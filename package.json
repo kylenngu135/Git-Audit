@@ -8,6 +8,7 @@
     "start:mcp": "tsx src/mcp/server.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
     "@modelcontextprotocol/sdk": "latest",
     "@types/node": "latest",
     "tsx": "latest",

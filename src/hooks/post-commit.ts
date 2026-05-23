@@ -5,6 +5,7 @@ import { findRepoRoot, listPendingEvents, updatePromptEvent } from "../shared/ev
 import { getCurrentCommitHash, getDiffHunks, getChangedFiles } from "../shared/gitUtils.js";
 import { parseDiff, filterSignificantHunks, groupHunksByFile } from "../shared/diffParser.js";
 import { getFunctionsChangedInCommit } from "../shared/functionDetector.js";
+import { runAuditOrchestrator } from "../audit/orchestrator.js";
 
 export async function runPostCommitHook(): Promise<void> {
   // Step 1 — Find repo root
@@ -74,10 +75,27 @@ export async function runPostCommitHook(): Promise<void> {
   );
   await fs.writeFile(changesetPath, JSON.stringify(changeset, null, 2));
 
-  // Step 8 — Log completion
   process.stderr.write(
-    `prompt-audit: changeset saved. ${functionsChanged.size} function(s) detected. Ready for audit card generation.\n`
+    `prompt-audit: changeset saved. ${functionsChanged.size} function(s) detected.\n`
   );
+
+  // Step 8 — Trigger audit card generation
+  if (!process.env.ANTHROPIC_API_KEY) {
+    process.stderr.write(
+      `prompt-audit: ANTHROPIC_API_KEY not set, skipping audit card generation. Set it and run: node --import tsx/esm src/audit/orchestrator.ts ${event.id}\n`
+    );
+    return;
+  }
+
+  process.stderr.write("prompt-audit: generating audit cards via Claude...\n");
+  try {
+    await runAuditOrchestrator(event.id, repoRoot);
+  } catch (err) {
+    process.stderr.write(
+      `prompt-audit: audit card generation failed: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+  }
+  process.stderr.write("prompt-audit: done. Run 'audit show' to see results.\n");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
