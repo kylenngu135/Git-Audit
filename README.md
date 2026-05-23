@@ -3,12 +3,13 @@
 > The missing history layer for AI-assisted development.
 
 git-audit captures every prompt you send to Claude Code,
-links it to the code it produced, and generates structured
-audit cards for every function that changed — automatically,
+links it to the code it produced, and writes a structured
+audit card for every function that changed — automatically,
 on every commit. The full decision history is committed
 alongside your code and shared with your entire team via git.
 
 **Platform support:** Linux and macOS. Windows not yet supported.
+**Languages detected:** TypeScript, JavaScript, TSX, JSX, Python.
 
 ---
 
@@ -16,8 +17,8 @@ alongside your code and shared with your entire team via git.
 
 AI coding tools generate code faster than teams can trust it.
 When Claude Code writes a function, the prompt that caused it,
-the design decisions it made, and the risks it introduced all
-disappear the moment the session ends.
+the intent behind it, and the response Claude gave all disappear
+the moment the session ends.
 
 Git saves *what* changed. It has no idea *why*.
 
@@ -36,16 +37,23 @@ This creates compounding problems across your entire workflow:
 
 ## How It Works
 
-Every time you prompt Claude Code, git-audit captures it
-automatically as a prompt event via MCP. When you commit,
-the post-commit hook:
+Every time you prompt Claude Code, git-audit captures it as a
+pending prompt event via two MCP tools:
 
-1. Links the prompt to the commit hash
-2. Detects every function that changed at the line level
-3. Generates a structured audit card per function via
-   Claude Code CLI (uses your existing Claude subscription —
-   no separate API key required)
-4. Commits the audit cards alongside your code automatically
+- `capture_prompt` — called before changes, records the raw
+  prompt, your one-line intention, and the AI tool used
+- `capture_response` — called after changes, records the
+  response summary and the list of files Claude modified
+
+When you commit, the post-commit hook:
+
+1. Picks up the most recent pending prompt event
+2. Diffs the commit and detects every changed function at
+   the line level (TS, JS, TSX, JSX, and Python)
+3. Writes one audit card per function with the prompt,
+   intention, and Claude's response summary attached
+4. Marks the event `audited` and commits the cards alongside
+   your code automatically
 
 Your teammates pull the code — the full context comes with it.
 
@@ -58,8 +66,6 @@ Your teammates pull the code — the full context comes with it.
 - npm
 - Git
 - Claude Code installed and authenticated
-- A Claude Pro or Max subscription (used for audit card
-  generation — no separate API key needed)
 
 ---
 
@@ -83,7 +89,8 @@ audit help
 
 ### Step 2 — Install tsx globally
 
-tsx is required to run the MCP server from any directory:
+tsx is required to run the hook scripts and the MCP server
+in a non-interactive shell:
 
 ```bash
 npm install -g tsx
@@ -99,12 +106,19 @@ audit init
 ```
 
 This automatically:
-- Creates the .audit/ directory structure
-- Installs the post-commit and pre-push git hooks
-- Generates a configured mcp.json for Claude Code
+- Creates the `.audit/` directory structure
+- Installs the `post-commit` and `pre-push` git hooks
+  (using absolute paths to tsx and the hook scripts so they
+  work in any shell)
+- Generates a configured `mcp.json` for Claude Code
 - Registers the MCP server with Claude Code
-- Configures ~/.claude/CLAUDE.md so Claude Code always
-  calls capture_prompt before making changes
+- Configures `~/.claude/CLAUDE.md` so Claude Code always
+  calls `capture_prompt` before changes and `capture_response`
+  after them
+
+If a git-audit hook already exists, `audit init` rewrites it
+in place; if a non-git-audit hook exists, init warns and
+prints the snippet to add manually.
 
 ### Step 4 — Verify MCP is connected
 
@@ -118,7 +132,8 @@ Ask it:
 What MCP tools do you have available?
 ```
 
-You should see capture_prompt listed. If not, run:
+You should see `capture_prompt` and `capture_response` listed.
+If not, run:
 ```bash
 claude mcp list
 ```
@@ -136,37 +151,36 @@ Use Claude Code normally. Commit normally. git-audit runs
 in the background automatically.
 
 ```bash
-# 1. Use Claude Code — prompts captured automatically
+# 1. Use Claude Code — capture_prompt/capture_response fire automatically
 claude
 
-# 2. Commit as normal — hook fires automatically
+# 2. Commit as normal — the post-commit hook does the rest
 git add -A && git commit -m "your message"
 
-# 3. Watch audit cards generate in the terminal output
-# git-audit: auditing processPayment in src/payments/handler.ts...
-# git-audit: ✓ processPayment — 1 risk(s) found
-# git-audit: audit complete in 8.3s — 3 succeeded, 0 failed
+# 3. Watch the hook output
+# git-audit: changed files: math_ops.py
+# git-audit: detected 2 function(s)
+# git-audit: ✓ add in math_ops.py
+# git-audit: ✓ sub in math_ops.py
+# git-audit: 2 card(s) saved. Run 'audit show <function>' to view.
 ```
+
+If you commit without a pending prompt event (e.g. a hand-typed
+commit), the hook prints `git-audit: no pending prompt event
+found. Did you forget to use capture_prompt?` and exits cleanly
+— it never blocks the commit.
 
 ---
 
 ## CLI Commands
 
 ```bash
-# Codebase-wide trust and risk overview
-audit status
-
-# Full prompt event history
-audit log
-
-# Complete audit history for a specific function
-audit show <functionName>
-
-# Check for design philosophy conflicts before merging
-audit merge <source-branch>
-
-# Show help
-audit help
+audit init              # Set up git-audit in this repo
+audit status            # Codebase overview: tracked functions + recent activity
+audit log               # Full prompt event history
+audit show <function>   # Audit history for a specific function
+audit merge <branch>    # Check for audit conflicts before merging
+audit help              # Show this help text
 ```
 
 ---
@@ -177,26 +191,30 @@ audit help
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  git-audit — codebase trust report                  │
+│  git-audit — codebase overview                      │
 └─────────────────────────────────────────────────────┘
 
-  Functions audited     4
-  Avg trust score       87/100
-  Unverified            4
+  Functions tracked     6
+  Prompt events         5
 
-  Risk summary
-  ────────────
-  🔴 High      0
-  🟡 Medium    1
+  Recent activity
+  ───────────────
 
-  All functions
-  ─────────────
-  [75/100] divide — src/example/calculator.ts
-  [90/100] add — src/example/calculator.ts
-  [90/100] multiply — src/example/calculator.ts
-  [90/100] subtract — src/example/calculator.ts
+  ✅ 5/23/2026 — "Modify add() in math_ops.py"
+         Intent: "Verify Python detection picks up changes inside add()"
+  ✅ 5/23/2026 — "write mult and div in python now"
+         Intent: "adding multiplication and division functions to the Python m"
 
-  Run 'audit show <function>' for full audit history.
+  All tracked functions
+  ─────────────────────
+
+  divide — math_ops.js — 1 audit(s)
+  mult   — math_ops.js — 1 audit(s)
+  add    — math_ops.py — 1 audit(s)
+  sub    — math_ops.py — 3 audit(s)
+
+  ─────────────────────────────────────────────────────
+  Run 'audit show <function>' for full history.
 ```
 
 ### audit show add
@@ -206,34 +224,27 @@ audit help
 │  git-audit — add                                    │
 └─────────────────────────────────────────────────────┘
 
-  File          src/example/calculator.ts
+  File          math_ops.py
   Audits        1
-  Open risks    0
-  Trust score   90/100  █████████░
 
   ─────────────────────────────────────────────────────
-  Audit 1 of 1 — 5/23/2026
-  Commit: a22d254
-  Prompt: "create a calculator module with add and divide..."
+  5/23/2026 — commit 63f37c7
 
-  What changed
-  ────────────
-  The add function accepts two numeric arguments and
-  returns their sum with basic input validation.
+  Intention
+  ─────────
+  Verify Python detection picks up changes inside add()
 
-  Design decisions
-  ────────────────
-  1. Chose Number.isFinite over typeof checks because it
-     correctly rejects NaN and Infinity
+  Prompt
+  ──────
+  Modify add() in math_ops.py
 
-  Risks
-  ─────
-  ✓ No risks flagged
+  Claude's response
+  ─────────────────
+  Added a comment above the return inside add(); behavior
+  unchanged.
 
-  Suggested tests
-  ───────────────
-  □ Given valid integers when add(2, 3) then returns 5
-  □ Given NaN input when add(NaN, 1) then throws TypeError
+  ─────────────────────────────────────────────────────
+  Run 'audit status' for codebase overview.
 ```
 
 ### audit merge
@@ -249,15 +260,9 @@ audit help
      These are design-level conflicts git cannot see.
 
   ─────────────────────────────────────────────────────
-  Audit conflict 1 of 1
-  ─────────────────────────────────────────────────────
   Function:  processPayment
-  Type:      direct-opposition
-  Severity:  🔴 high
-
   Branch "feature/caching" intent:
     Cache validation results for performance
-
   Branch "main" intent:
     Always validate fresh for compliance
 
@@ -267,38 +272,60 @@ audit help
 
 ---
 
-## How Audit Cards Work
+## What's in an Audit Card
 
-Each function touched by a Claude Code prompt gets a
-structured audit card containing:
+Each function touched by a Claude Code prompt gets a card
+with these fields:
 
-- **What** — plain English explanation of what changed
-- **Decisions** — each design decision as "Chose X over Y
-  because Z"
-- **Risks** — flagged edge cases with severity levels
-  (low / medium / high)
-- **Suggested tests** — specific test cases to verify before
-  shipping
+- **functionName** — name detected from the source
+- **file** — repo-relative path
+- **commitHash** — the commit that produced the change
+- **prompt** — the user's raw prompt to Claude
+- **intention** — the one-line "why" Claude recorded via
+  `capture_prompt`
+- **responseSummary** — 2–3 sentence summary Claude wrote
+  via `capture_response`
+- **createdAt** — ISO timestamp
 
-Cards are stored in .audit/functions/ and committed to your
-repo automatically on every commit.
+Cards live in `.audit/functions/` next to a per-function
+`*_record.json` that aggregates the audit history. Both are
+committed to your repo automatically.
+
+---
+
+## Function Detection
+
+`audit init` processes any file ending in `.ts`, `.js`,
+`.tsx`, `.jsx`, or `.py`.
+
+- **JS/TS** — detects `function foo()`, `const foo = () =>`,
+  and method shorthand inside classes; function bodies are
+  bounded by brace depth.
+- **Python** — detects `def`, `async def`, and `def` indented
+  4 spaces (class methods); function bodies are bounded by
+  indentation (the function ends at the dedent back to the
+  `def` line's level).
+
+When a diff hunk overlaps multiple functions, every function
+it touches gets an audit card. Hunks outside any function are
+attributed to `module-level`.
 
 ---
 
 ## Repository Structure
 
-After running audit init, your repo will have:
+After running `audit init`, your repo will have:
 
 ```
 your-project/
   .audit/
-    events/          ← prompt events and changesets
-    functions/       ← audit cards and function records
-    conflicts/       ← merge conflict reports
+    events/          ← prompt events (one JSON per capture_prompt)
+    functions/       ← audit cards + per-function records
+    conflicts/       ← audit merge conflict reports
   .git/
     hooks/
-      post-commit    ← auto-generates audit cards on commit
-      pre-push       ← warns before pushing high-risk functions
+      post-commit    ← generates audit cards on every commit
+      pre-push       ← prints an audit summary before push
   mcp.json           ← Claude Code MCP configuration (gitignored)
 ```
 
@@ -312,41 +339,24 @@ Before merging branches, run:
 audit merge feature/my-branch
 ```
 
-git-audit compares the design philosophies from both branches
-and flags contradictions that git cannot detect — such as one
+git-audit compares the intents recorded on both branches and
+flags contradictions that git cannot detect — such as one
 branch caching aggressively while another requires fresh
 verification on every call for compliance reasons.
 
-You resolve conflicts at the intent level. Your resolution is
-recorded permanently in the audit history so future developers
-understand why the system works the way it does.
-
-git does not run automatically — audit merge is a read-only
-analysis tool. Run git merge separately after resolving.
+You resolve conflicts at the intent level. `audit merge` is a
+read-only analysis tool; run `git merge` separately after
+reviewing.
 
 ---
 
-## Pre-Push Safety Gate
+## Pre-Push Summary
 
-Before every git push, git-audit checks for functions with
-unresolved high severity risks or trust scores below 50.
-If any are found, it warns you and asks for confirmation.
+Before every `git push`, git-audit prints a one-line summary
+of how many functions are tracked and how many total audits
+exist on this branch. It does not block the push.
 
-To bypass for a single push:
+To skip the hook entirely:
 ```bash
 git push --no-verify
 ```
-
----
-
-## Codebase Convention Learning
-
-As your audit history grows, git-audit automatically extracts
-patterns from past audit cards and injects them as context
-into every new audit. This means:
-
-- New functions are audited relative to your team's established
-  patterns, not generic best practices
-- Recurring failure modes get flagged more precisely over time
-- Conventions are applied automatically — you never need to
-  re-explain your standards to the auditor
