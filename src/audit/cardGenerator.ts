@@ -1,7 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
+import path from "path";
+import { tmpdir } from "os";
+import { writeFile, unlink } from "fs/promises";
+import { exec } from "child_process";
+import { promisify } from "util";
 import type { AuditContext } from "./contextBuilder.js";
 import type { AuditCard } from "../shared/types.js";
 import { generateId, getCurrentTimestamp } from "../shared/utils.js";
+
+const execAsync = promisify(exec);
 
 const SYSTEM_MESSAGE =
   "You are a precise code auditor. You analyze code changes made by AI coding assistants and return structured audit data as raw JSON. You never add explanation or markdown.";
@@ -30,9 +36,23 @@ export function buildAuditPrompt(context: AuditContext): string {
 
   if (context.cobaseConventions.length > 0) {
     lines.push("");
-    lines.push("KNOWN CODEBASE CONVENTIONS (flag violations):");
+    lines.push("KNOWN CODEBASE CONVENTIONS (flag any violations in your audit):");
     for (const convention of context.cobaseConventions) {
-      lines.push(convention);
+      lines.push(`- ${convention}`);
+    }
+  }
+
+  if (context.codebaseSummary && context.codebaseSummary.totalFunctions > 0) {
+    const summary = context.codebaseSummary;
+    lines.push("");
+    lines.push("FULL CODEBASE AUDIT SUMMARY:");
+    lines.push(`Total functions audited in this codebase: ${summary.totalFunctions}`);
+    lines.push(`Functions with open high risks: ${summary.functionsWithHighRisks}`);
+    if (summary.recentFunctions.length > 0) {
+      lines.push("Most recently audited functions and their key decisions:");
+      for (const rf of summary.recentFunctions) {
+        lines.push(`- ${rf.functionName} (${rf.file}): ${rf.latestDecision}`);
+      }
     }
   }
 
@@ -61,52 +81,19 @@ export function buildAuditPrompt(context: AuditContext): string {
 
 const REQUIRED_FIELDS = ["what", "decisions", "risks", "testssuggested", "trustStatus"] as const;
 
-export async function generateAuditCard(
-  context: AuditContext,
-  _repoRoot: string
-): Promise<AuditCard> {
-  const client = new Anthropic();
-  const prompt = buildAuditPrompt(context);
+function stripMarkdownFences(raw: string): string {
+  return raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+}
 
-  let raw: string;
-  try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: SYSTEM_MESSAGE,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("Claude response contained no text block");
-    }
-    raw = textBlock.text;
-  } catch (err) {
-    process.stderr.write(
-      `git-audit: Claude API call failed: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    throw new Error(
-      `Failed to generate audit card: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-
-  // Strip accidental markdown fences
-  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    throw new Error(`Claude returned invalid JSON: ${raw.slice(0, 200)}`);
-  }
-
+function validateParsed(parsed: Record<string, unknown>): void {
   for (const field of REQUIRED_FIELDS) {
     if (!(field in parsed)) {
-      throw new Error(`Claude response missing required field: "${field}"`);
+      throw new Error(`Audit response missing required field: "${field}"`);
     }
   }
+}
 
+function buildAuditCard(context: AuditContext, parsed: Record<string, unknown>): AuditCard {
   return {
     promptEventId: context.promptEvent.id,
     commitHash: context.commitHash,
@@ -120,4 +107,120 @@ export async function generateAuditCard(
     trustStatus: parsed.trustStatus as "unverified" | "verified" | "flagged",
     createdAt: getCurrentTimestamp(),
   };
+}
+
+async function isClaudeCliAvailable(): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync("which claude");
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function generateViaClaudeCli(prompt: string): Promise<Record<string, unknown>> {
+  const tmpFile = path.join(tmpdir(), `git-audit-${generateId()}.txt`);
+  await writeFile(tmpFile, prompt, "utf-8");
+
+  let stdout: string;
+  let stderr: string;
+  try {
+    const result = await execAsync(`claude -p "$(cat ${tmpFile})" < /dev/null`, {
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+    });
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } finally {
+    await unlink(tmpFile).catch(() => {});
+  }
+
+  if (stderr && stderr.trim().length > 0) {
+    process.stderr.write(`git-audit: claude CLI stderr: ${stderr}\n`);
+  }
+
+  if (!stdout || stdout.trim().length === 0) {
+    throw new Error(
+      "Claude Code CLI returned empty response. Is Claude Code installed and authenticated?"
+    );
+  }
+
+  const cleaned = stripMarkdownFences(stdout);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    process.stderr.write(`git-audit: raw Claude Code CLI stdout was:\n${stdout}\n`);
+    throw new Error("Failed to parse Claude Code CLI response as JSON");
+  }
+
+  validateParsed(parsed);
+  return parsed;
+}
+
+async function generateViaAnthropicApi(prompt: string): Promise<Record<string, unknown>> {
+  const Anthropic = (await import("@anthropic-ai/sdk")).default;
+  const client = new Anthropic();
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1024,
+    system: SYSTEM_MESSAGE,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("Claude response contained no text block");
+  }
+
+  const cleaned = stripMarkdownFences(textBlock.text);
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Claude returned invalid JSON: ${cleaned.slice(0, 200)}`);
+  }
+
+  validateParsed(parsed);
+  return parsed;
+}
+
+export async function generateAuditCard(
+  context: AuditContext,
+  _repoRoot: string
+): Promise<AuditCard> {
+  const prompt = buildAuditPrompt(context);
+  const cliAvailable = await isClaudeCliAvailable();
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (cliAvailable) {
+    process.stderr.write("git-audit: generating audit card via Claude Code CLI\n");
+    try {
+      const parsed = await generateViaClaudeCli(prompt);
+      return buildAuditCard(context, parsed);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (apiKey) {
+        process.stderr.write(
+          `git-audit: Claude Code CLI failed (${message}), falling back to API\n`
+        );
+        const parsed = await generateViaAnthropicApi(prompt);
+        return buildAuditCard(context, parsed);
+      }
+      throw new Error(
+        `git-audit: audit card generation failed. Claude Code CLI is not available and ANTHROPIC_API_KEY is not set. Install Claude Code or set ANTHROPIC_API_KEY. Underlying error: ${message}`
+      );
+    }
+  }
+
+  if (apiKey) {
+    process.stderr.write("git-audit: generating audit card via Anthropic API\n");
+    const parsed = await generateViaAnthropicApi(prompt);
+    return buildAuditCard(context, parsed);
+  }
+
+  throw new Error(
+    "git-audit: audit card generation failed. Claude Code CLI is not available and ANTHROPIC_API_KEY is not set. Install Claude Code or set ANTHROPIC_API_KEY."
+  );
 }

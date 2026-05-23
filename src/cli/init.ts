@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs/promises";
+import os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { fileURLToPath } from "url";
@@ -158,9 +159,10 @@ export async function runInit(): Promise<void> {
     );
 
     if (!apiKey) {
-      console.warn(
-        `[git-audit] WARNING: ANTHROPIC_API_KEY not set in environment. ` +
-          `Add it manually to mcp.json:\n  nano ${mcpConfigPath}`
+      console.log(
+        `[git-audit] ANTHROPIC_API_KEY not set — audit cards will be generated via the Claude Code CLI ` +
+          `(uses your Claude Pro/Max subscription). To enable the API as a fallback, add ANTHROPIC_API_KEY ` +
+          `to mcp.json:\n  nano ${mcpConfigPath}`
       );
     }
   }
@@ -178,14 +180,88 @@ export async function runInit(): Promise<void> {
     console.log("[git-audit] mcp.json added to .gitignore (contains API key — do not commit)");
   }
 
-  // Step 5 — Final instructions
+  // Step 6 — Create or update the global Claude Code CLAUDE.md
+  const claudeDir = path.join(os.homedir(), ".claude");
+  const claudeMdPath = path.join(claudeDir, "CLAUDE.md");
+  await fs.mkdir(claudeDir, { recursive: true });
+
+  const claudeMdSection = `# Global Claude Code Instructions
+
+## git-audit Integration
+
+Before making ANY code changes, you MUST always call the
+capture_prompt MCP tool first with the exact prompt I gave you.
+
+Rules:
+1. When I give you a coding task, call capture_prompt FIRST
+   before touching any files
+2. Only start making changes AFTER capture_prompt returns
+   a successful event ID
+3. If capture_prompt is not available, tell me before proceeding
+4. This applies to every coding task in every project
+`;
+
+  if (await existsAt(claudeMdPath)) {
+    const existing = await fs.readFile(claudeMdPath, "utf-8");
+    if (existing.includes("capture_prompt")) {
+      console.log("[git-audit] ~/.claude/CLAUDE.md already configured");
+    } else {
+      const separator = existing.endsWith("\n") ? "\n" : "\n\n";
+      await fs.appendFile(claudeMdPath, separator + claudeMdSection);
+      console.log(
+        "[git-audit] ~/.claude/CLAUDE.md configured — Claude Code will now call capture_prompt automatically"
+      );
+    }
+  } else {
+    await fs.writeFile(claudeMdPath, claudeMdSection);
+    console.log(
+      "[git-audit] ~/.claude/CLAUDE.md configured — Claude Code will now call capture_prompt automatically"
+    );
+  }
+
+  // Step 7 — Register MCP server with Claude Code CLI
+  try {
+    let registerTsxPath: string;
+    try {
+      const { stdout } = await execAsync("which tsx");
+      registerTsxPath = stdout.trim();
+      if (!registerTsxPath) {
+        registerTsxPath = "/home/kylenngu/.npm-global/bin/tsx";
+      }
+    } catch {
+      registerTsxPath = "/home/kylenngu/.npm-global/bin/tsx";
+    }
+
+    const claudeAddCmd = `claude mcp add git-audit ${registerTsxPath} ${mcpServerPath}`;
+    try {
+      await execAsync(claudeAddCmd);
+      console.log("[git-audit] MCP server registered with Claude Code");
+    } catch (err) {
+      const e = err as { stderr?: string; stdout?: string; message?: string };
+      const combined = `${e.stderr ?? ""}${e.stdout ?? ""}${e.message ?? ""}`;
+      if (combined.includes("already exists") || combined.includes("already added")) {
+        console.log("[git-audit] MCP server already registered with Claude Code — skipping");
+      } else {
+        console.warn(
+          `[git-audit] WARNING: could not auto-register MCP server with Claude Code. Run this manually:\n  ${claudeAddCmd}`
+        );
+      }
+    }
+  } catch {
+    console.warn(
+      `[git-audit] WARNING: could not auto-register MCP server with Claude Code. Run this manually:\n  claude mcp add git-audit ${tsxPath} ${mcpServerPath}`
+    );
+  }
+
+  // Final instructions
   console.log(`
 [git-audit] Setup complete. Next steps:
-  1. Register the MCP server with Claude Code:
-     claude mcp add git-audit ${tsxPath} ${mcpServerPath}
-  2. Use Claude Code normally — prompts will be captured automatically
-  3. After each git commit, the post-commit hook will link your prompt to the commit and detect changed functions
-  4. Run: audit status  to see audit results`);
+  1. Use Claude Code normally — prompts will be captured automatically
+  2. After each git commit, the post-commit hook will link your prompt to the commit and detect changed functions
+  3. Run: audit status  to see audit results
+
+[git-audit] Audit cards are generated via Claude Code CLI (uses your Claude Pro/Max subscription).
+No API key required. If Claude Code is unavailable, set ANTHROPIC_API_KEY as a fallback.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

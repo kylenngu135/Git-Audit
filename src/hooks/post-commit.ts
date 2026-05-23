@@ -79,15 +79,7 @@ export async function runPostCommitHook(): Promise<void> {
     `git-audit: changeset saved. ${functionsChanged.size} function(s) detected.\n`
   );
 
-  // Step 8 — Trigger audit card generation
-  if (!process.env.ANTHROPIC_API_KEY) {
-    process.stderr.write(
-      `git-audit: ANTHROPIC_API_KEY not set, skipping audit card generation. Set it and run: node --import tsx/esm src/audit/orchestrator.ts ${event.id}\n`
-    );
-    return;
-  }
-
-  process.stderr.write("git-audit: generating audit cards via Claude...\n");
+  // Step 8 — Trigger audit card generation (Claude Code CLI is preferred; API key is fallback)
   try {
     await runAuditOrchestrator(event.id, repoRoot);
   } catch (err) {
