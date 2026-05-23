@@ -13,7 +13,7 @@ export async function runPostCommitHook(): Promise<void> {
   try {
     repoRoot = await findRepoRoot(process.cwd());
   } catch {
-    process.stderr.write("prompt-audit: not in a git repo, skipping\n");
+    process.stderr.write("git-audit: not in a git repo, skipping\n");
     return;
   }
 
@@ -24,7 +24,7 @@ export async function runPostCommitHook(): Promise<void> {
   const pendingEvents = await listPendingEvents(repoRoot);
   if (pendingEvents.length === 0) {
     process.stderr.write(
-      "prompt-audit: no pending prompt event found for this commit. Skipping audit. Did you forget to use capture_prompt?\n"
+      "git-audit: no pending prompt event found for this commit. Skipping audit. Did you forget to use capture_prompt?\n"
     );
     return;
   }
@@ -39,7 +39,7 @@ export async function runPostCommitHook(): Promise<void> {
   const filteredHunks = filterSignificantHunks(allHunks);
   if (filteredHunks.length === 0) {
     process.stderr.write(
-      "prompt-audit: no significant code changes detected, skipping function analysis\n"
+      "git-audit: no significant code changes detected, skipping function analysis\n"
     );
     return;
   }
@@ -49,7 +49,7 @@ export async function runPostCommitHook(): Promise<void> {
   const functionsChanged = await getFunctionsChangedInCommit(changedFiles, filteredHunks, repoRoot);
   for (const [functionName, fn] of functionsChanged) {
     process.stderr.write(
-      `prompt-audit: detected change in function: ${functionName} in ${fn.file}\n`
+      `git-audit: detected change in function: ${functionName} in ${fn.file}\n`
     );
   }
 
@@ -76,32 +76,32 @@ export async function runPostCommitHook(): Promise<void> {
   await fs.writeFile(changesetPath, JSON.stringify(changeset, null, 2));
 
   process.stderr.write(
-    `prompt-audit: changeset saved. ${functionsChanged.size} function(s) detected.\n`
+    `git-audit: changeset saved. ${functionsChanged.size} function(s) detected.\n`
   );
 
   // Step 8 — Trigger audit card generation
   if (!process.env.ANTHROPIC_API_KEY) {
     process.stderr.write(
-      `prompt-audit: ANTHROPIC_API_KEY not set, skipping audit card generation. Set it and run: node --import tsx/esm src/audit/orchestrator.ts ${event.id}\n`
+      `git-audit: ANTHROPIC_API_KEY not set, skipping audit card generation. Set it and run: node --import tsx/esm src/audit/orchestrator.ts ${event.id}\n`
     );
     return;
   }
 
-  process.stderr.write("prompt-audit: generating audit cards via Claude...\n");
+  process.stderr.write("git-audit: generating audit cards via Claude...\n");
   try {
     await runAuditOrchestrator(event.id, repoRoot);
   } catch (err) {
     process.stderr.write(
-      `prompt-audit: audit card generation failed: ${err instanceof Error ? err.message : String(err)}\n`
+      `git-audit: audit card generation failed: ${err instanceof Error ? err.message : String(err)}\n`
     );
   }
-  process.stderr.write("prompt-audit: done. Run 'audit show' to see results.\n");
+  process.stderr.write("git-audit: done. Run 'audit show' to see results.\n");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runPostCommitHook().catch((err: unknown) => {
     process.stderr.write(
-      `prompt-audit error: ${err instanceof Error ? err.message : String(err)}\n`
+      `git-audit error: ${err instanceof Error ? err.message : String(err)}\n`
     );
   });
 }

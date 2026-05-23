@@ -5,8 +5,6 @@ import { findRepoRoot, loadPromptEvent } from "../shared/eventStore.js";
 import { loadFunctionRecord, loadAuditCard } from "../audit/cardStore.js";
 import type { AuditCard, FunctionRecord } from "../shared/types.js";
 
-const SEP = "─────────────────────────────────────────";
-const SEP_SHORT = "  ─────────────────────────────────";
 
 function riskEmoji(severity: "low" | "medium" | "high"): string {
   if (severity === "high") return "🔴";
@@ -42,8 +40,38 @@ export async function runShow(functionName: string): Promise<void> {
   const functionsDir = path.join(repoRoot, ".audit", "functions");
 
   const recordFilename = await findRecordFile(functionsDir, functionName);
+  // ── Display helpers ──────────────────────────────────
+  const BOX = 53;
+  const IND = "  ";
+
+  const boxLine = (text: string) => `│  ${text.padEnd(BOX - 2)}│`;
+
+  const stat = (label: string, value: string) =>
+    `${IND}${label.padEnd(14)}${value}`;
+
+  const section = (title: string) => {
+    console.log();
+    console.log(`${IND}${title}`);
+    console.log(`${IND}${"─".repeat(title.length)}`);
+  };
+
+  const trustBar = (score: number): string => {
+    const filled = Math.round(score / 10);
+    const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+    const code = score >= 80 ? "\x1b[32m" : score >= 50 ? "\x1b[33m" : "\x1b[31m";
+    return `${code}${bar}\x1b[0m`;
+  };
+
+  // ── Not found ────────────────────────────────────────
   if (!recordFilename) {
-    console.log(`No audit record found for function: ${functionName}`);
+    console.log(`┌${"─".repeat(BOX)}┐`);
+    console.log(boxLine("git-audit — function not found"));
+    console.log(`└${"─".repeat(BOX)}┘`);
+    console.log();
+    console.log(`${IND}No audit record found for: ${functionName}`);
+    console.log();
+    console.log(`${IND}Has this function been committed with Claude Code running?`);
+    console.log(`${IND}Run 'audit log' to see all captured prompts.`);
     return;
   }
 
@@ -55,18 +83,21 @@ export async function runShow(functionName: string): Promise<void> {
 
   const activeRisks = record.openRisks.filter((r) => !r.resolvedByPromptId);
 
-  console.log(SEP);
-  console.log(`Function: ${record.functionName}`);
-  console.log(`File:     ${record.file}`);
-  console.log(SEP);
-  console.log(`Audit history: ${record.auditHistory.length} audit(s)`);
-  console.log(`Open risks:    ${activeRisks.length} risk(s)`);
-  console.log(`Trust score:   ${record.trustScore}/100`);
-  console.log(SEP);
+  // ── Header ────────────────────────────────────────────
+  console.log(`┌${"─".repeat(BOX)}┐`);
+  console.log(boxLine(`git-audit — ${record.functionName}`));
+  console.log(`└${"─".repeat(BOX)}┘`);
+  console.log();
+  console.log(stat("File", record.file));
+  console.log(stat("Audits", String(record.auditHistory.length)));
+  console.log(stat("Open risks", String(activeRisks.length)));
+  console.log(stat("Trust score", `${record.trustScore}/100  ${trustBar(record.trustScore)}`));
 
+  // ── Audit history (newest first) ──────────────────────
   const historyNewestFirst = [...record.auditHistory].reverse();
 
-  for (const entry of historyNewestFirst) {
+  for (let i = 0; i < historyNewestFirst.length; i++) {
+    const entry = historyNewestFirst[i];
     let card: AuditCard | undefined;
     let promptPreview = entry.promptEventId;
 
@@ -78,41 +109,51 @@ export async function runShow(functionName: string): Promise<void> {
 
     try {
       const event = await loadPromptEvent(entry.promptEventId, repoRoot);
-      promptPreview = event.rawPrompt.slice(0, 80);
+      const rp = event.rawPrompt;
+      promptPreview = rp.length > 80 ? rp.slice(0, 80) + "..." : rp;
     } catch {
       // event file missing — fall back to id
     }
 
+    const dateStr = card ? new Date(card.createdAt).toLocaleDateString() : "unknown";
+
     console.log();
-    console.log(`  Prompt: "${promptPreview}"`);
-    console.log(`  Commit: ${entry.commitHash}`);
+    console.log(`${IND}${"─".repeat(BOX)}`);
+    console.log(`${IND}Audit ${i + 1} of ${historyNewestFirst.length} — ${dateStr}`);
+    console.log(`${IND}Commit: ${entry.commitHash}`);
+    console.log(`${IND}Prompt: "${promptPreview}"`);
 
     if (card) {
-      const dateStr = new Date(card.createdAt).toLocaleDateString();
-      console.log(`  Date:   ${dateStr}`);
-      console.log();
-      console.log("  What changed:");
-      console.log(`  ${card.what}`);
-      console.log();
-      console.log("  Design decisions:");
-      for (const decision of card.decisions) {
-        console.log(`  • ${decision}`);
+      section("What changed");
+      console.log(`${IND}${card.what}`);
+
+      section("Design decisions");
+      card.decisions.forEach((decision, idx) => {
+        console.log(`${IND}${idx + 1}. ${decision}`);
+      });
+
+      section("Risks");
+      if (card.risks.length === 0) {
+        console.log(`${IND}✓ No risks flagged`);
+      } else {
+        for (const risk of card.risks) {
+          console.log(
+            `${IND}${riskEmoji(risk.severity)} ${risk.severity.toUpperCase().padEnd(8)}${risk.message}`
+          );
+        }
       }
-      console.log();
-      console.log("  Risks:");
-      for (const risk of card.risks) {
-        console.log(`  ${riskEmoji(risk.severity)} ${risk.message}`);
-      }
-      console.log();
-      console.log("  Suggested tests:");
+
+      section("Suggested tests");
       for (const test of card.testssuggested) {
-        console.log(`  □ ${test}`);
+        console.log(`${IND}□ ${test}`);
       }
     }
-
-    console.log();
-    console.log(SEP_SHORT);
   }
+
+  // ── Footer ────────────────────────────────────────────
+  console.log();
+  console.log(`${IND}${"─".repeat(BOX)}`);
+  console.log(`${IND}Run 'audit status' for codebase overview.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -122,7 +163,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   runShow(functionName).catch((err: unknown) => {
-    console.error("prompt-audit error:", err instanceof Error ? err.message : String(err));
+    console.error("git-audit error:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

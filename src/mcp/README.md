@@ -1,15 +1,15 @@
-# prompt-audit MCP Server
+# git-audit MCP Server
 
-This MCP server captures AI prompts at the moment they are submitted to Claude Code and writes them as structured JSON records to `.audit/events/`. It acts as the entry point for the prompt-audit workflow: every prompt gets an ID and a timestamp before any code changes happen, so there is always a traceable link between what was asked and what was committed.
+This MCP server captures AI prompts at the moment they are submitted to Claude Code and writes them as structured JSON records to `.audit/events/`. It acts as the entry point for the git-audit workflow: every prompt gets an ID and a timestamp before any code changes happen, so there is always a traceable link between what was asked and what was committed.
 
 ## Connecting to Claude Code
 
-Copy `mcp.json` from the project root into your project, or manually add the `prompt-audit` entry to your existing Claude Code MCP config at `~/.claude/mcp.json`:
+Copy `mcp.json` from the project root into your project, or manually add the `git-audit` entry to your existing Claude Code MCP config at `~/.claude/mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "prompt-audit": {
+    "git-audit": {
       "command": "node",
       "args": ["--import", "tsx/esm", "src/mcp/server.ts"],
       "env": {}

@@ -64,7 +64,7 @@ export async function runAuditOrchestrator(
     targetEventId = await findMostRecentLinkedEvent(root);
     if (!targetEventId) {
       process.stderr.write(
-        "prompt-audit: no linked prompt events found to audit. Run after committing AI-generated code.\n"
+        "git-audit: no linked prompt events found to audit. Run after committing AI-generated code.\n"
       );
       return;
     }
@@ -78,7 +78,7 @@ export async function runAuditOrchestrator(
   };
 
   if (!changeset.functionsChanged || changeset.functionsChanged.length === 0) {
-    process.stderr.write("prompt-audit: no functions to audit in this changeset\n");
+    process.stderr.write("git-audit: no functions to audit in this changeset\n");
     return;
   }
 
@@ -87,12 +87,12 @@ export async function runAuditOrchestrator(
   const preview = promptEvent.rawPrompt.slice(0, 60);
 
   process.stderr.write(
-    `prompt-audit: starting audit for ${changeset.functionsChanged.length} function(s) from prompt: ${preview}...\n`
+    `git-audit: starting audit for ${changeset.functionsChanged.length} function(s) from prompt: ${preview}...\n`
   );
 
   // Process each function sequentially
   for (const fn of changeset.functionsChanged) {
-    process.stderr.write(`prompt-audit: auditing ${fn.functionName} in ${fn.file}...\n`);
+    process.stderr.write(`git-audit: auditing ${fn.functionName} in ${fn.file}...\n`);
 
     try {
       // Use rawContent from changeset if available, otherwise empty string
@@ -115,11 +115,11 @@ export async function runAuditOrchestrator(
       await saveOrUpdateFunctionRecord(card, root);
 
       process.stderr.write(
-        `prompt-audit: ✓ ${fn.functionName} — ${card.risks.length} risk(s) found, trust score saved\n`
+        `git-audit: ✓ ${fn.functionName} — ${card.risks.length} risk(s) found, trust score saved\n`
       );
     } catch (err) {
       process.stderr.write(
-        `prompt-audit: error auditing ${fn.functionName}: ${err instanceof Error ? err.message : String(err)}\n`
+        `git-audit: error auditing ${fn.functionName}: ${err instanceof Error ? err.message : String(err)}\n`
       );
     }
   }
@@ -127,13 +127,13 @@ export async function runAuditOrchestrator(
   // Mark event as audited
   await updatePromptEvent(targetEventId, { status: "audited" }, root);
 
-  process.stderr.write("prompt-audit: audit complete. Cards saved to .audit/functions/\n");
+  process.stderr.write("git-audit: audit complete. Cards saved to .audit/functions/\n");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const eventId = process.argv[2];
   runAuditOrchestrator(eventId).catch((err) => {
-    console.error("prompt-audit error:", (err as Error).message);
+    console.error("git-audit error:", (err as Error).message);
     process.exit(1);
   });
 }

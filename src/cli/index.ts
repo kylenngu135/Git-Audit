@@ -11,7 +11,7 @@ const HELP_TEXT = `────────────────────�
 audit — prompt-native version control for AI-generated code
 
 Usage:
-  audit init              Set up prompt-audit in this repo
+  audit init              Set up git-audit in this repo
   audit status            Codebase-wide trust and risk overview
   audit show <function>   Full audit history for a function
   audit log               All prompt events and what they caused

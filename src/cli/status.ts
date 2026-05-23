@@ -8,7 +8,6 @@ import type { FunctionRecord } from "../shared/types.js";
 type OpenRisk = FunctionRecord["openRisks"][number] & { resolvedByPromptId?: string };
 type Record = Omit<FunctionRecord, "openRisks"> & { openRisks: OpenRisk[] };
 
-const SEP = "─────────────────────────────────────────";
 
 async function loadLatestTrustStatus(
   record: Record,
@@ -40,7 +39,7 @@ export async function runStatus(): Promise<void> {
 
   if (recordFiles.length === 0) {
     console.log(
-      "No audit records found. Have you committed any AI-generated code with prompt-audit running?"
+      "No audit records found. Have you committed any AI-generated code with git-audit running?"
     );
     return;
   }
@@ -57,7 +56,7 @@ export async function runStatus(): Promise<void> {
 
   if (records.length === 0) {
     console.log(
-      "No audit records found. Have you committed any AI-generated code with prompt-audit running?"
+      "No audit records found. Have you committed any AI-generated code with git-audit running?"
     );
     return;
   }
@@ -85,50 +84,77 @@ export async function runStatus(): Promise<void> {
     records.reduce((sum, r) => sum + r.trustScore, 0) / records.length
   );
 
-  console.log(SEP);
-  console.log("prompt-audit status");
-  console.log(SEP);
-  console.log(`Functions audited:   ${totalFunctions}`);
-  console.log(`Unverified:          ${unverified}`);
-  console.log(`Avg trust score:     ${averageTrustScore}/100`);
-  console.log(SEP);
-  console.log("Open risks:");
-  console.log(`  🔴 High:    ${highRisks}`);
-  console.log(`  🟡 Medium:  ${mediumRisks}`);
-  console.log(SEP);
+  // ── Display ─────────────────────────────────────────
+  const BOX = 53;
+  const INDENT = "  ";
 
-  // Functions with high risks
+  const stat = (label: string, value: string) =>
+    `${INDENT}${label.padEnd(22)}${value}`;
+
+  const section = (title: string) =>
+    `\n${INDENT}${title}\n${INDENT}${"─".repeat(title.length)}`;
+
+  const colorScore = (score: number, text: string) => {
+    const code = score >= 80 ? "\x1b[32m" : score >= 50 ? "\x1b[33m" : "\x1b[31m";
+    return `${code}${text}\x1b[0m`;
+  };
+
+  // Header box
+  console.log(`┌${"─".repeat(BOX)}┐`);
+  console.log(`│  ${"git-audit — codebase trust report".padEnd(BOX - 2)}│`);
+  console.log(`└${"─".repeat(BOX)}┘`);
+  console.log();
+
+  // Summary stats
+  console.log(stat("Functions audited", String(totalFunctions)));
+  console.log(stat("Avg trust score", `${averageTrustScore}/100`));
+  console.log(stat("Unverified", String(unverified)));
+
+  // Risk summary
+  console.log(section("Risk summary"));
+  console.log(`${INDENT}🔴 High      ${highRisks}`);
+  console.log(`${INDENT}🟡 Medium    ${mediumRisks}`);
+
+  // Needs attention
   const highRiskFunctions = records.filter((r) =>
     r.openRisks.some((risk) => !risk.resolvedByPromptId && risk.severity === "high")
   );
 
   if (highRiskFunctions.length > 0) {
-    console.log("Functions requiring attention:");
+    console.log(section("Needs attention"));
     for (const record of highRiskFunctions) {
       const activeHigh = record.openRisks.filter(
         (r) => !r.resolvedByPromptId && r.severity === "high"
       );
-      console.log(
-        `  ⚠  ${record.functionName} (${record.file}) — ${activeHigh.length} high risk(s)`
-      );
+      console.log(`\n${INDENT}⚠  ${record.functionName}`);
+      console.log(`     ${record.file}`);
+      console.log(`     ${activeHigh.length} high risk(s):`);
       for (const risk of activeHigh) {
-        console.log(`       • ${risk.message}`);
+        console.log(`     • ${risk.message}`);
       }
     }
-    console.log();
   }
 
   // All functions sorted by trust score ascending
   const sorted = [...records].sort((a, b) => a.trustScore - b.trustScore);
-  console.log("All audited functions (lowest trust first):");
+  console.log(section("All functions"));
+  console.log();
   for (const record of sorted) {
-    console.log(`  [${record.trustScore}/100] ${record.functionName} — ${record.file}`);
+    const scoreLabel = `[${record.trustScore}/100]`;
+    const fileIndent = " ".repeat(INDENT.length + scoreLabel.length + 1);
+    console.log(`${INDENT}${colorScore(record.trustScore, scoreLabel)} ${record.functionName}`);
+    console.log(`${fileIndent}${record.file}`);
   }
+
+  // Footer
+  console.log();
+  console.log(`${INDENT}Run 'audit show <function>' for full audit history.`);
+  console.log(`${INDENT}${"─".repeat(BOX)}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runStatus().catch((err: unknown) => {
-    console.error("prompt-audit error:", err instanceof Error ? err.message : String(err));
+    console.error("git-audit error:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

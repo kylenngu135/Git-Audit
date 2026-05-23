@@ -56,3 +56,4 @@ coverage/
 .audit/functions/*
 !.audit/events/.gitkeep
 !.audit/functions/.gitkeep
+mcp.json

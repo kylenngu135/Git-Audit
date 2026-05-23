@@ -5,7 +5,7 @@ import type { PromptEvent } from "../shared/types.js";
 import { generateId, getCurrentTimestamp } from "../shared/utils.js";
 import { savePromptEvent, findRepoRoot } from "../shared/eventStore.js";
 
-const server = new McpServer({ name: "prompt-audit", version: "0.1.0" });
+const server = new McpServer({ name: "git-audit", version: "0.1.0" });
 
 server.tool(
   "capture_prompt",
@@ -55,4 +55,4 @@ server.tool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write("prompt-audit MCP server running\n");
+process.stderr.write("git-audit MCP server running\n");

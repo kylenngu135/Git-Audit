@@ -33,7 +33,7 @@ export async function runInit(): Promise<void> {
   try {
     repoRoot = await findRepoRoot(process.cwd());
   } catch (err) {
-    console.error(`[prompt-audit] Error: ${(err as Error).message}`);
+    console.error(`[git-audit] Error: ${(err as Error).message}`);
     process.exit(1);
   }
 
@@ -54,7 +54,7 @@ export async function runInit(): Promise<void> {
   await createIfAbsent(path.join(repoRoot, ".audit", "functions", ".gitkeep"));
   await createIfAbsent(path.join(repoRoot, ".audit", "conflicts", ".gitkeep"));
 
-  console.log("[prompt-audit] .audit/ directory structure created");
+  console.log("[git-audit] .audit/ directory structure created");
 
   // Step 3 — Install the post-commit git hook
   const hooksDir = path.join(repoRoot, ".git", "hooks");
@@ -65,11 +65,11 @@ export async function runInit(): Promise<void> {
 
   if (await existsAt(hookPath)) {
     const existing = await fs.readFile(hookPath, "utf-8");
-    if (existing.includes("prompt-audit")) {
-      console.log("[prompt-audit] post-commit hook already installed, skipping");
+    if (existing.includes("git-audit")) {
+      console.log("[git-audit] post-commit hook already installed, skipping");
     } else {
       console.warn(
-        "[prompt-audit] WARNING: a post-commit hook already exists. " +
+        "[git-audit] WARNING: a post-commit hook already exists. " +
           "Please manually add the following line to your existing hook:"
       );
       console.warn(`  ${nodeCommand}`);
@@ -77,37 +77,100 @@ export async function runInit(): Promise<void> {
   } else {
     await fs.writeFile(hookPath, hookContent);
     await fs.chmod(hookPath, 0o755);
-    console.log("[prompt-audit] post-commit hook installed");
+    console.log("[git-audit] post-commit hook installed");
+  }
+
+  // Install the pre-push git hook
+  const prePushPath = path.join(hooksDir, "pre-push");
+  const prePushScriptPath = path.join(installRoot, "src", "hooks", "pre-push.ts");
+  const prePushCommand = `/home/kylenngu/.npm-global/bin/tsx ${prePushScriptPath}`;
+  const prePushContent = `#!/bin/sh\n${prePushCommand}\n`;
+
+  if (await existsAt(prePushPath)) {
+    const existing = await fs.readFile(prePushPath, "utf-8");
+    if (existing.includes("git-audit") || existing.includes("pre-push.ts")) {
+      console.log("[git-audit] pre-push hook already installed, skipping");
+    } else {
+      console.warn(
+        "[git-audit] WARNING: a pre-push hook already exists. " +
+          "Please manually add the following line to your existing hook:"
+      );
+      console.warn(`  ${prePushCommand}`);
+    }
+  } else {
+    await fs.writeFile(prePushPath, prePushContent);
+    await fs.chmod(prePushPath, 0o755);
+    console.log("[git-audit] pre-push hook installed");
   }
 
   // Step 4 — Write the MCP server config
   const mcpConfigPath = path.join(repoRoot, "mcp.json");
-  const mcpServerPath = path.join(installRoot, "dist", "mcp", "server.js");
+  const mcpServerPath = path.join(installRoot, "src", "mcp", "server.ts");
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
+
+  // Find the global tsx binary so the MCP server starts from any directory
+  let tsxPath: string;
+  try {
+    const { stdout } = await execAsync("which tsx");
+    tsxPath = stdout.trim();
+    if (!tsxPath) throw new Error("empty");
+  } catch {
+    tsxPath = "/home/kylenngu/.npm-global/bin/tsx";
+    console.warn(
+      "[git-audit] WARNING: could not find tsx globally, using fallback path. " +
+        "If MCP fails, run: npm install -g tsx"
+    );
+  }
 
   if (await existsAt(mcpConfigPath)) {
-    console.log("[prompt-audit] mcp.json already exists, skipping");
+    console.log("[git-audit] mcp.json already exists, skipping");
   } else {
     const mcpConfig = {
       mcpServers: {
-        "prompt-audit": {
-          command: "node",
+        "git-audit": {
+          command: tsxPath,
           args: [mcpServerPath],
-          env: {},
+          cwd: installRoot,
+          env: {
+            ANTHROPIC_API_KEY: apiKey,
+          },
         },
       },
     };
     await fs.writeFile(mcpConfigPath, JSON.stringify(mcpConfig, null, 2) + "\n");
+    console.log(
+      "[git-audit] mcp.json written with absolute paths and API key — ready for Claude Code"
+    );
+
+    if (!apiKey) {
+      console.warn(
+        `[git-audit] WARNING: ANTHROPIC_API_KEY not set in environment. ` +
+          `Add it manually to mcp.json:\n  nano ${mcpConfigPath}`
+      );
+    }
   }
-  console.log("[prompt-audit] mcp.json written");
+
+  // Add mcp.json to .gitignore (contains API key)
+  const gitignorePath = path.join(repoRoot, ".gitignore");
+  if (await existsAt(gitignorePath)) {
+    const gitignoreContent = await fs.readFile(gitignorePath, "utf-8");
+    if (!gitignoreContent.split("\n").some((line) => line.trim() === "mcp.json")) {
+      await fs.appendFile(gitignorePath, "\nmcp.json\n");
+      console.log("[git-audit] mcp.json added to .gitignore (contains API key — do not commit)");
+    }
+  } else {
+    await fs.writeFile(gitignorePath, "mcp.json\n");
+    console.log("[git-audit] mcp.json added to .gitignore (contains API key — do not commit)");
+  }
 
   // Step 5 — Final instructions
   console.log(`
-[prompt-audit] Setup complete. Next steps:
-  1. Add mcp.json to your Claude Code MCP configuration
-  2. Start the MCP server: npm run start:mcp
-  3. Use Claude Code normally — prompts will be captured automatically
-  4. After each git commit, the post-commit hook will link your prompt to the commit and detect changed functions
-  5. Run: node --import tsx/esm src/cli/status.ts to see audit status`);
+[git-audit] Setup complete. Next steps:
+  1. Register the MCP server with Claude Code:
+     claude mcp add git-audit ${tsxPath} ${mcpServerPath}
+  2. Use Claude Code normally — prompts will be captured automatically
+  3. After each git commit, the post-commit hook will link your prompt to the commit and detect changed functions
+  4. Run: audit status  to see audit results`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

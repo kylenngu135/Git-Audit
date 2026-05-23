@@ -84,7 +84,7 @@ export async function generateAuditCard(
     raw = textBlock.text;
   } catch (err) {
     process.stderr.write(
-      `prompt-audit: Claude API call failed: ${err instanceof Error ? err.message : String(err)}\n`
+      `git-audit: Claude API call failed: ${err instanceof Error ? err.message : String(err)}\n`
     );
     throw new Error(
       `Failed to generate audit card: ${err instanceof Error ? err.message : String(err)}`
