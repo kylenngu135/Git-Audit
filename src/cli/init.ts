@@ -27,11 +27,40 @@ async function createIfAbsent(filePath: string, content = ""): Promise<void> {
   }
 }
 
+async function detectTsxPath(): Promise<string> {
+  for (const probe of ["command -v tsx", "which tsx"]) {
+    try {
+      const { stdout } = await execAsync(probe);
+      const candidate = stdout.trim().split("\n")[0];
+      if (candidate) {
+        await fs.access(candidate);
+        return candidate;
+      }
+    } catch {
+      // try next probe
+    }
+  }
+  throw new Error(
+    "could not find 'tsx' on PATH. Install it globally with:\n" +
+      "  npm install -g tsx\n" +
+      "Then re-run: audit init"
+  );
+}
+
 export async function runInit(): Promise<void> {
   // Step 1 — Find repo root
   let repoRoot: string;
   try {
     repoRoot = await findRepoRoot(process.cwd());
+  } catch (err) {
+    console.error(`[git-audit] Error: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  // Detect tsx once and reuse — the pre-push hook and mcp.json both need it
+  let tsxPath: string;
+  try {
+    tsxPath = await detectTsxPath();
   } catch (err) {
     console.error(`[git-audit] Error: ${(err as Error).message}`);
     process.exit(1);
@@ -83,7 +112,7 @@ export async function runInit(): Promise<void> {
   // Install the pre-push git hook
   const prePushPath = path.join(hooksDir, "pre-push");
   const prePushScriptPath = path.join(installRoot, "src", "hooks", "pre-push.ts");
-  const prePushCommand = `/home/kylenngu/.npm-global/bin/tsx ${prePushScriptPath}`;
+  const prePushCommand = `${tsxPath} ${prePushScriptPath}`;
   const prePushContent = `#!/bin/sh\n${prePushCommand}\n`;
 
   if (await existsAt(prePushPath)) {
@@ -107,20 +136,6 @@ export async function runInit(): Promise<void> {
   const mcpConfigPath = path.join(repoRoot, "mcp.json");
   const mcpServerPath = path.join(installRoot, "src", "mcp", "server.ts");
   const apiKey = process.env.ANTHROPIC_API_KEY ?? "";
-
-  // Find the global tsx binary so the MCP server starts from any directory
-  let tsxPath: string;
-  try {
-    const { stdout } = await execAsync("which tsx");
-    tsxPath = stdout.trim();
-    if (!tsxPath) throw new Error("empty");
-  } catch {
-    tsxPath = "/home/kylenngu/.npm-global/bin/tsx";
-    console.warn(
-      "[git-audit] WARNING: could not find tsx globally, using fallback path. " +
-        "If MCP fails, run: npm install -g tsx"
-    );
-  }
 
   if (await existsAt(mcpConfigPath)) {
     console.log("[git-audit] mcp.json already exists, skipping");

@@ -31,42 +31,38 @@ Your teammates pull the code and the full context comes with it.
 ## Installation
 
 ### Prerequisites
-- Node.js 18+
-- npm
-- Git
-- An Anthropic API key
 
-### Install globally
+You need `node` (18+), `git`, `tsx`, and the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH, plus an [Anthropic API key](https://console.anthropic.com/settings/keys).
 
 ```bash
-git clone https://github.com/yourusername/git-audit
-cd git-audit
+# Install the npm-managed pieces if they're missing
+npm install -g tsx @anthropic-ai/claude-code
+```
+
+### One-time setup (per machine)
+
+```bash
+git clone git@github.com:kylenngu135/Git-Audit.git
+cd Git-Audit
 npm install
 npm run build
 npm link
+
+# Export your API key so commit-time audits can call Claude
+echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.bashrc   # or ~/.zshrc
+source ~/.bashrc
 ```
 
-### Set up in any repo
+The `audit` command is now globally available.
+
+### Per-project setup
 
 ```bash
-cd your-project
-audit init
+cd your-project          # any git repo
+audit init               # creates .audit/, installs hooks, writes mcp.json
 ```
 
-This creates the .audit/ directory structure, installs the post-commit and pre-push hooks, and generates a configured mcp.json for Claude Code.
-
-### Connect Claude Code
-
-```bash
-claude mcp add git-audit $(which tsx) /path/to/git-audit/src/mcp/server.ts
-```
-
-### Set your API key
-
-Add to your shell profile (~/.zshrc or ~/.bashrc):
-```bash
-export ANTHROPIC_API_KEY=your_key_here
-```
+`audit init` auto-detects your `tsx` path on this host — no hardcoded paths. At the end it prints a ready-to-copy `claude mcp add ...` command. Run that once per project to register the MCP server with Claude Code, then start Claude Code from the project root and you're done.
 
 ## Usage
 
