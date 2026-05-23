@@ -7,9 +7,10 @@ import { findRepoRoot } from "../shared/eventStore.js";
 
 const execAsync = promisify(exec);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "../..");
+const installRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../"
+);
 
 async function existsAt(filePath: string): Promise<boolean> {
   try {
@@ -38,20 +39,28 @@ export async function runInit(): Promise<void> {
 
   // Step 2 — Create .audit/ directory structure
   await fs.mkdir(path.join(repoRoot, ".audit"), { recursive: true });
-  await fs.mkdir(path.join(repoRoot, ".audit", "events"), { recursive: true });
-  await fs.mkdir(path.join(repoRoot, ".audit", "functions"), { recursive: true });
+  if (!(await existsAt(path.join(repoRoot, ".audit", "events")))) {
+    await fs.mkdir(path.join(repoRoot, ".audit", "events"), { recursive: true });
+  }
+  if (!(await existsAt(path.join(repoRoot, ".audit", "functions")))) {
+    await fs.mkdir(path.join(repoRoot, ".audit", "functions"), { recursive: true });
+  }
+  if (!(await existsAt(path.join(repoRoot, ".audit", "conflicts")))) {
+    await fs.mkdir(path.join(repoRoot, ".audit", "conflicts"), { recursive: true });
+  }
 
   await createIfAbsent(path.join(repoRoot, ".audit", ".gitkeep"));
   await createIfAbsent(path.join(repoRoot, ".audit", "events", ".gitkeep"));
   await createIfAbsent(path.join(repoRoot, ".audit", "functions", ".gitkeep"));
+  await createIfAbsent(path.join(repoRoot, ".audit", "conflicts", ".gitkeep"));
 
   console.log("[prompt-audit] .audit/ directory structure created");
 
   // Step 3 — Install the post-commit git hook
   const hooksDir = path.join(repoRoot, ".git", "hooks");
   const hookPath = path.join(hooksDir, "post-commit");
-  const hookScriptPath = path.resolve(projectRoot, "src/hooks/post-commit.ts");
-  const nodeCommand = `node --import tsx/esm ${hookScriptPath}`;
+  const hookScriptPath = path.join(installRoot, "dist", "hooks", "post-commit.js");
+  const nodeCommand = `node ${hookScriptPath}`;
   const hookContent = `#!/bin/sh\n${nodeCommand}\n`;
 
   if (await existsAt(hookPath)) {
@@ -73,7 +82,7 @@ export async function runInit(): Promise<void> {
 
   // Step 4 — Write the MCP server config
   const mcpConfigPath = path.join(repoRoot, "mcp.json");
-  const mcpServerPath = path.resolve(projectRoot, "src/mcp/server.ts");
+  const mcpServerPath = path.join(installRoot, "dist", "mcp", "server.js");
 
   if (await existsAt(mcpConfigPath)) {
     console.log("[prompt-audit] mcp.json already exists, skipping");
@@ -82,7 +91,7 @@ export async function runInit(): Promise<void> {
       mcpServers: {
         "prompt-audit": {
           command: "node",
-          args: ["--import", "tsx/esm", mcpServerPath],
+          args: [mcpServerPath],
           env: {},
         },
       },

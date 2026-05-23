@@ -1,0 +1,13 @@
+[
+  {
+    "functionName": "processUserData",
+    "file": "src/example/dataProcessor.ts",
+    "conflictType": "direct-opposition",
+    "branchA": "feature/performance-mode",
+    "branchB": "master",
+    "branchAIntent": "cache results aggressively to optimize performance and avoid redundant computation",
+    "branchBIntent": "no-cache policy to ensure data accuracy — every call must recompute from source",
+    "explanation": "Branch feature/performance-mode uses \"cache\" while branch master uses \"no-cache\" for the same function — these are direct design opposites.",
+    "severity": "high"
+  }
+]

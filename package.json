@@ -2,10 +2,22 @@
   "name": "prompt-audit",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "audit": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --outDir dist",
     "dev": "tsx watch src/mcp/server.ts",
-    "start:mcp": "tsx src/mcp/server.ts"
+    "start:mcp": "tsx src/mcp/server.ts",
+    "link": "npm run build && npm link",
+    "audit:init": "node --import tsx/esm src/cli/index.ts init",
+    "audit:log": "node --import tsx/esm src/cli/index.ts log",
+    "audit:status": "node --import tsx/esm src/cli/index.ts status",
+    "audit:show": "node --import tsx/esm src/cli/index.ts show"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
