@@ -4,6 +4,18 @@ import type { PromptEvent, AuditCard, FunctionRecord } from "../shared/types.js"
 import { loadPromptEvent } from "../shared/eventStore.js";
 import { getFunctionsDir } from "../shared/utils.js";
 
+let conventionsCache: string[] | null = null;
+let codebaseSummaryCache: {
+  totalFunctions: number;
+  functionsWithHighRisks: number;
+  recentFunctions: Array<{
+    functionName: string;
+    file: string;
+    latestDecision: string;
+  }>;
+} | null = null;
+let cacheRepoRoot: string | null = null;
+
 export interface CodebaseSummary {
   totalFunctions: number;
   functionsWithHighRisks: number;
@@ -178,6 +190,9 @@ export async function extractConventions(
   currentFile: string,
   currentFunctionName: string
 ): Promise<string[]> {
+  if (conventionsCache !== null && cacheRepoRoot === repoRoot) {
+    return conventionsCache;
+  }
   const recordPaths = await listRecordPaths(repoRoot);
   const cards: AuditCard[] = [];
   const highRiskMessages: string[] = [];
@@ -242,10 +257,14 @@ export async function extractConventions(
   }
 
   const unique = Array.from(new Set(conventions));
-  return unique.slice(0, 8);
+  conventionsCache = unique.slice(0, 8);
+  return conventionsCache;
 }
 
 export async function getCodebaseSummary(repoRoot: string): Promise<CodebaseSummary | undefined> {
+  if (codebaseSummaryCache !== null && cacheRepoRoot === repoRoot) {
+    return codebaseSummaryCache;
+  }
   const dir = getFunctionsDir(repoRoot);
   let entries: string[];
   try {
@@ -297,7 +316,20 @@ export async function getCodebaseSummary(repoRoot: string): Promise<CodebaseSumm
   }
 
   if (totalFunctions === 0) return undefined;
-  return { totalFunctions, functionsWithHighRisks, recentFunctions };
+  const result = { totalFunctions, functionsWithHighRisks, recentFunctions };
+  codebaseSummaryCache = result;
+  return result;
+}
+
+export async function initAuditCache(repoRoot: string): Promise<void> {
+  cacheRepoRoot = repoRoot;
+  conventionsCache = await extractConventions(repoRoot, "", "");
+  const summary = await getCodebaseSummary(repoRoot);
+  codebaseSummaryCache = summary ?? null;
+  const totalFunctions = codebaseSummaryCache?.totalFunctions ?? 0;
+  process.stderr.write(
+    `git-audit: cached ${conventionsCache.length} conventions and ${totalFunctions} function records\n`
+  );
 }
 
 export async function buildAuditContext(
