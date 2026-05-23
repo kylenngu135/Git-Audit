@@ -1,0 +1,17 @@
+{
+  "promptEventId": "strict001",
+  "commitHash": "2e247f4",
+  "file": "src/example/dataProcessor.ts",
+  "functionName": "processUserData",
+  "linesChanged": { "start": 1, "end": 6 },
+  "what": "Added processUserData with strict correctness-first approach: always validate, no-cache policy to ensure data accuracy on every call.",
+  "decisions": [
+    "no-cache policy to ensure data accuracy — every call must recompute from source",
+    "always validate userId input strictly before processing any data",
+    "throw on invalid input rather than returning null to make errors explicit"
+  ],
+  "risks": [],
+  "testssuggested": [],
+  "trustStatus": "unverified",
+  "createdAt": "2026-05-23T05:35:00.000Z"
+}
