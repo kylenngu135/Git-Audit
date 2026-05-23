@@ -5,19 +5,20 @@ export interface PromptEvent {
   status: "pending" | "linked" | "audited";
   linkedCommit: string | undefined;
   aiTool: string;
+  intention: string | undefined;
+  responseSummary: string | undefined;
+  filesChanged: string[] | undefined;
 }
 
 export interface AuditCard {
+  id: string;
   promptEventId: string;
   commitHash: string;
   file: string;
   functionName: string;
-  linesChanged: { start: number; end: number };
-  what: string;
-  decisions: string[];
-  risks: { message: string; severity: "low" | "medium" | "high" }[];
-  testssuggested: string[];
-  trustStatus: "unverified" | "verified" | "flagged";
+  prompt: string;
+  intention: string;
+  responseSummary: string;
   createdAt: string;
 }
 
@@ -27,6 +28,4 @@ export interface FunctionRecord {
   createdByPromptId: string;
   lastModifiedByPromptId: string;
   auditHistory: { promptEventId: string; commitHash: string; cardRef: string }[];
-  openRisks: { message: string; severity: "low" | "medium" | "high"; introducedByPromptId: string }[];
-  trustScore: number;
 }

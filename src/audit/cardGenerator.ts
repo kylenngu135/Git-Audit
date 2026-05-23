@@ -1,3 +1,9 @@
+// NOTE: This module is no longer used in the automatic
+// audit pipeline. Cards are now generated directly from
+// the developer's intention and Claude's captured
+// response in the post-commit hook.
+// Kept as a manual fallback for deep analysis.
+
 import path from "path";
 import { tmpdir } from "os";
 import { writeFile, unlink } from "fs/promises";
@@ -79,7 +85,7 @@ export function buildAuditPrompt(context: AuditContext): string {
   return lines.join("\n");
 }
 
-const REQUIRED_FIELDS = ["what", "decisions", "risks", "testssuggested", "trustStatus"] as const;
+const REQUIRED_FIELDS = ["what"] as const;
 
 function stripMarkdownFences(raw: string): string {
   return raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -95,16 +101,14 @@ function validateParsed(parsed: Record<string, unknown>): void {
 
 function buildAuditCard(context: AuditContext, parsed: Record<string, unknown>): AuditCard {
   return {
+    id: generateId(),
     promptEventId: context.promptEvent.id,
     commitHash: context.commitHash,
     file: context.file,
     functionName: context.functionName,
-    linesChanged: { start: context.startLine, end: context.endLine },
-    what: parsed.what as string,
-    decisions: parsed.decisions as string[],
-    risks: parsed.risks as { message: string; severity: "low" | "medium" | "high" }[],
-    testssuggested: parsed.testssuggested as string[],
-    trustStatus: parsed.trustStatus as "unverified" | "verified" | "flagged",
+    prompt: context.promptEvent.rawPrompt.slice(0, 300),
+    intention: context.promptEvent.intention?.slice(0, 300) ?? "No intention captured.",
+    responseSummary: (parsed.what as string | undefined)?.slice(0, 500) ?? "No response summary captured.",
     createdAt: getCurrentTimestamp(),
   };
 }

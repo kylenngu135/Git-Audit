@@ -88,7 +88,10 @@ export async function runLog(): Promise<void> {
 
     console.log(`${IND}${statusEmoji(event.status)} [${i + 1}/${events.length}] ${datePart} ${timePart}`);
     console.log(`${IND}${PIPE}`);
-    console.log(`${IND}${PIPE}  ${wrapPrompt(event.rawPrompt)}`);
+    console.log(`${IND}${PIPE}  "${wrapPrompt(event.rawPrompt.slice(0, 70))}"`);
+    if (event.intention) {
+      console.log(`${IND}${PIPE}  Intent: "${event.intention.slice(0, 70)}"`);
+    }
     console.log(`${IND}${PIPE}`);
     console.log(meta("ID", event.id));
     console.log(meta("Commit", commit));

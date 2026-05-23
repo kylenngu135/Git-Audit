@@ -1,15 +1,23 @@
 import path from "path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { findRepoRoot, loadPromptEvent } from "../shared/eventStore.js";
-import { loadFunctionRecord, loadAuditCard } from "../audit/cardStore.js";
+import { findRepoRoot } from "../shared/eventStore.js";
+import { loadAuditCard } from "../audit/cardStore.js";
 import type { AuditCard, FunctionRecord } from "../shared/types.js";
 
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
 
-function riskEmoji(severity: "low" | "medium" | "high"): string {
-  if (severity === "high") return "🔴";
-  if (severity === "medium") return "🟡";
-  return "🟢";
+function maybeDisplay(text: string): string {
+  const fallbacks = [
+    "No intention captured.",
+    "No prompt captured.",
+    "No response summary captured.",
+    "Captured before intention tracking was added.",
+    "Captured before response tracking was added.",
+  ];
+  if (fallbacks.includes(text)) return `${DIM}${text}${RESET}`;
+  return text;
 }
 
 async function findRecordFile(
@@ -39,30 +47,14 @@ export async function runShow(functionName: string): Promise<void> {
   const repoRoot = await findRepoRoot(process.cwd());
   const functionsDir = path.join(repoRoot, ".audit", "functions");
 
-  const recordFilename = await findRecordFile(functionsDir, functionName);
-  // ── Display helpers ──────────────────────────────────
   const BOX = 53;
   const IND = "  ";
 
   const boxLine = (text: string) => `│  ${text.padEnd(BOX - 2)}│`;
+  const stat = (label: string, value: string) => `${IND}${label.padEnd(14)}${value}`;
 
-  const stat = (label: string, value: string) =>
-    `${IND}${label.padEnd(14)}${value}`;
+  const recordFilename = await findRecordFile(functionsDir, functionName);
 
-  const section = (title: string) => {
-    console.log();
-    console.log(`${IND}${title}`);
-    console.log(`${IND}${"─".repeat(title.length)}`);
-  };
-
-  const trustBar = (score: number): string => {
-    const filled = Math.round(score / 10);
-    const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-    const code = score >= 80 ? "\x1b[32m" : score >= 50 ? "\x1b[33m" : "\x1b[31m";
-    return `${code}${bar}\x1b[0m`;
-  };
-
-  // ── Not found ────────────────────────────────────────
   if (!recordFilename) {
     console.log(`┌${"─".repeat(BOX)}┐`);
     console.log(boxLine("git-audit — function not found"));
@@ -75,82 +67,57 @@ export async function runShow(functionName: string): Promise<void> {
     return;
   }
 
-  type ExtendedRisk = FunctionRecord["openRisks"][number] & { resolvedByPromptId?: string };
-  type ExtendedRecord = Omit<FunctionRecord, "openRisks"> & { openRisks: ExtendedRisk[] };
-
   const raw = await fs.readFile(path.join(functionsDir, recordFilename), "utf-8");
-  const record = JSON.parse(raw) as ExtendedRecord;
+  const record = JSON.parse(raw) as FunctionRecord;
 
-  const activeRisks = record.openRisks.filter((r) => !r.resolvedByPromptId);
-
-  // ── Header ────────────────────────────────────────────
   console.log(`┌${"─".repeat(BOX)}┐`);
   console.log(boxLine(`git-audit — ${record.functionName}`));
   console.log(`└${"─".repeat(BOX)}┘`);
   console.log();
   console.log(stat("File", record.file));
   console.log(stat("Audits", String(record.auditHistory.length)));
-  console.log(stat("Open risks", String(activeRisks.length)));
-  console.log(stat("Trust score", `${record.trustScore}/100  ${trustBar(record.trustScore)}`));
 
-  // ── Audit history (newest first) ──────────────────────
   const historyNewestFirst = [...record.auditHistory].reverse();
 
-  for (let i = 0; i < historyNewestFirst.length; i++) {
-    const entry = historyNewestFirst[i];
+  for (const entry of historyNewestFirst) {
     let card: AuditCard | undefined;
-    let promptPreview = entry.promptEventId;
-
     try {
       card = await loadAuditCard(entry.cardRef);
     } catch {
-      // card file missing — show what we have
-    }
-
-    try {
-      const event = await loadPromptEvent(entry.promptEventId, repoRoot);
-      const rp = event.rawPrompt;
-      promptPreview = rp.length > 80 ? rp.slice(0, 80) + "..." : rp;
-    } catch {
-      // event file missing — fall back to id
+      // card file missing — show what we have from the record entry
     }
 
     const dateStr = card ? new Date(card.createdAt).toLocaleDateString() : "unknown";
+    const hash = entry.commitHash.slice(0, 7);
 
     console.log();
     console.log(`${IND}${"─".repeat(BOX)}`);
-    console.log(`${IND}Audit ${i + 1} of ${historyNewestFirst.length} — ${dateStr}`);
-    console.log(`${IND}Commit: ${entry.commitHash}`);
-    console.log(`${IND}Prompt: "${promptPreview}"`);
+    console.log(`${IND}${dateStr} — commit ${hash}`);
 
     if (card) {
-      section("What changed");
-      console.log(`${IND}${card.what}`);
+      const intention = card.intention ?? "No intention captured.";
+      const prompt = card.prompt ?? "No prompt captured.";
+      const responseSummary = card.responseSummary ?? "No response summary captured.";
 
-      section("Design decisions");
-      card.decisions.forEach((decision, idx) => {
-        console.log(`${IND}${idx + 1}. ${decision}`);
-      });
+      console.log();
+      console.log(`${IND}Intention`);
+      console.log(`${IND}─────────`);
+      console.log(`${IND}${maybeDisplay(intention)}`);
 
-      section("Risks");
-      if (card.risks.length === 0) {
-        console.log(`${IND}✓ No risks flagged`);
-      } else {
-        for (const risk of card.risks) {
-          console.log(
-            `${IND}${riskEmoji(risk.severity)} ${risk.severity.toUpperCase().padEnd(8)}${risk.message}`
-          );
-        }
-      }
+      console.log();
+      console.log(`${IND}Prompt`);
+      console.log(`${IND}──────`);
+      console.log(`${IND}${maybeDisplay(prompt)}`);
 
-      section("Suggested tests");
-      for (const test of card.testssuggested) {
-        console.log(`${IND}□ ${test}`);
-      }
+      console.log();
+      console.log(`${IND}Claude's response`);
+      console.log(`${IND}─────────────────`);
+      console.log(`${IND}${maybeDisplay(responseSummary)}`);
+    } else {
+      console.log(`${IND}${DIM}Card data not available.${RESET}`);
     }
   }
 
-  // ── Footer ────────────────────────────────────────────
   console.log();
   console.log(`${IND}${"─".repeat(BOX)}`);
   console.log(`${IND}Run 'audit status' for codebase overview.`);

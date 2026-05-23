@@ -2,154 +2,104 @@ import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "node:url";
 import { findRepoRoot } from "../shared/eventStore.js";
-import { getFunctionsDir } from "../shared/utils.js";
-import type { FunctionRecord } from "../shared/types.js";
-
-type OpenRisk = FunctionRecord["openRisks"][number] & { resolvedByPromptId?: string };
-type Record = Omit<FunctionRecord, "openRisks"> & { openRisks: OpenRisk[] };
-
-
-async function loadLatestTrustStatus(
-  record: Record,
-  functionsDir: string
-): Promise<"unverified" | "verified" | "flagged"> {
-  if (record.auditHistory.length === 0) return "unverified";
-  const latest = record.auditHistory[record.auditHistory.length - 1];
-  try {
-    const raw = await fs.readFile(latest.cardRef, "utf-8");
-    const card = JSON.parse(raw) as { trustStatus: "unverified" | "verified" | "flagged" };
-    return card.trustStatus;
-  } catch {
-    return "unverified";
-  }
-}
+import { getFunctionsDir, getEventsDir } from "../shared/utils.js";
+import type { FunctionRecord, PromptEvent } from "../shared/types.js";
 
 export async function runStatus(): Promise<void> {
   const repoRoot = await findRepoRoot(process.cwd());
   const functionsDir = getFunctionsDir(repoRoot);
+  const eventsDir = getEventsDir(repoRoot);
 
-  let entries: string[];
+  let funcEntries: string[];
   try {
-    entries = await fs.readdir(functionsDir);
+    funcEntries = await fs.readdir(functionsDir);
   } catch {
-    entries = [];
+    funcEntries = [];
   }
 
-  const recordFiles = entries.filter((e) => e.endsWith("_record.json"));
-
-  if (recordFiles.length === 0) {
-    console.log(
-      "No audit records found. Have you committed any AI-generated code with git-audit running?"
-    );
-    return;
-  }
-
-  const records: Record[] = [];
+  const recordFiles = funcEntries.filter((e) => e.endsWith("_record.json"));
+  const records: FunctionRecord[] = [];
   for (const filename of recordFiles) {
     try {
       const raw = await fs.readFile(path.join(functionsDir, filename), "utf-8");
-      records.push(JSON.parse(raw) as Record);
+      records.push(JSON.parse(raw) as FunctionRecord);
     } catch {
       // skip unreadable records
     }
   }
 
-  if (records.length === 0) {
-    console.log(
-      "No audit records found. Have you committed any AI-generated code with git-audit running?"
-    );
-    return;
+  let eventEntries: string[];
+  try {
+    eventEntries = await fs.readdir(eventsDir);
+  } catch {
+    eventEntries = [];
   }
 
-  // Compute summary stats
-  let unverified = 0;
-  for (const record of records) {
-    const status = await loadLatestTrustStatus(record, functionsDir);
-    if (status === "unverified") unverified++;
-  }
-
-  const totalFunctions = records.length;
-
-  let highRisks = 0;
-  let mediumRisks = 0;
-  for (const record of records) {
-    for (const risk of record.openRisks) {
-      if (risk.resolvedByPromptId) continue;
-      if (risk.severity === "high") highRisks++;
-      else if (risk.severity === "medium") mediumRisks++;
+  const events: PromptEvent[] = [];
+  for (const filename of eventEntries) {
+    if (!filename.endsWith(".json") || filename.endsWith("-changeset.json")) continue;
+    try {
+      const raw = await fs.readFile(path.join(eventsDir, filename), "utf-8");
+      events.push(JSON.parse(raw) as PromptEvent);
+    } catch {
+      // skip
     }
   }
+  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
-  const averageTrustScore = Math.round(
-    records.reduce((sum, r) => sum + r.trustScore, 0) / records.length
-  );
-
-  // ── Display ─────────────────────────────────────────
   const BOX = 53;
   const INDENT = "  ";
-
-  const stat = (label: string, value: string) =>
-    `${INDENT}${label.padEnd(22)}${value}`;
 
   const section = (title: string) =>
     `\n${INDENT}${title}\n${INDENT}${"─".repeat(title.length)}`;
 
-  const colorScore = (score: number, text: string) => {
-    const code = score >= 80 ? "\x1b[32m" : score >= 50 ? "\x1b[33m" : "\x1b[31m";
-    return `${code}${text}\x1b[0m`;
-  };
-
-  // Header box
   console.log(`┌${"─".repeat(BOX)}┐`);
-  console.log(`│  ${"git-audit — codebase trust report".padEnd(BOX - 2)}│`);
+  console.log(`│  ${"git-audit — codebase overview".padEnd(BOX - 2)}│`);
   console.log(`└${"─".repeat(BOX)}┘`);
   console.log();
 
-  // Summary stats
-  console.log(stat("Functions audited", String(totalFunctions)));
-  console.log(stat("Avg trust score", `${averageTrustScore}/100`));
-  console.log(stat("Unverified", String(unverified)));
+  console.log(`${INDENT}${"Functions tracked".padEnd(22)}${records.length}`);
+  console.log(`${INDENT}${"Prompt events".padEnd(22)}${events.length}`);
 
-  // Risk summary
-  console.log(section("Risk summary"));
-  console.log(`${INDENT}🔴 High      ${highRisks}`);
-  console.log(`${INDENT}🟡 Medium    ${mediumRisks}`);
+  // Recent activity — last 5 audited events
+  const recentEvents = events
+    .filter((e) => e.status !== "pending")
+    .slice(0, 5);
 
-  // Needs attention
-  const highRiskFunctions = records.filter((r) =>
-    r.openRisks.some((risk) => !risk.resolvedByPromptId && risk.severity === "high")
-  );
-
-  if (highRiskFunctions.length > 0) {
-    console.log(section("Needs attention"));
-    for (const record of highRiskFunctions) {
-      const activeHigh = record.openRisks.filter(
-        (r) => !r.resolvedByPromptId && r.severity === "high"
-      );
-      console.log(`\n${INDENT}⚠  ${record.functionName}`);
-      console.log(`     ${record.file}`);
-      console.log(`     ${activeHigh.length} high risk(s):`);
-      for (const risk of activeHigh) {
-        console.log(`     • ${risk.message}`);
+  if (recentEvents.length > 0) {
+    console.log(section("Recent activity"));
+    console.log();
+    for (const event of recentEvents) {
+      const date = new Date(event.timestamp).toLocaleDateString();
+      const promptSnip = event.rawPrompt.slice(0, 60);
+      const intentionSnip = (event.intention ?? "").slice(0, 60);
+      console.log(`${INDENT}✅ ${date} — "${promptSnip}"`);
+      if (intentionSnip) {
+        console.log(`${INDENT}${"".padEnd(7)}Intent: "${intentionSnip}"`);
       }
     }
   }
 
-  // All functions sorted by trust score ascending
-  const sorted = [...records].sort((a, b) => a.trustScore - b.trustScore);
-  console.log(section("All functions"));
-  console.log();
-  for (const record of sorted) {
-    const scoreLabel = `[${record.trustScore}/100]`;
-    const fileIndent = " ".repeat(INDENT.length + scoreLabel.length + 1);
-    console.log(`${INDENT}${colorScore(record.trustScore, scoreLabel)} ${record.functionName}`);
-    console.log(`${fileIndent}${record.file}`);
+  // All tracked functions
+  if (records.length > 0) {
+    console.log(section("All tracked functions"));
+    console.log();
+    for (const record of records) {
+      const auditCount = record.auditHistory.length;
+      console.log(
+        `${INDENT}${record.functionName} — ${record.file} — ${auditCount} audit(s)`
+      );
+    }
+  } else {
+    console.log();
+    console.log(
+      `${INDENT}No audit records found. Have you committed any AI-generated code with git-audit running?`
+    );
   }
 
-  // Footer
   console.log();
-  console.log(`${INDENT}Run 'audit show <function>' for full audit history.`);
   console.log(`${INDENT}${"─".repeat(BOX)}`);
+  console.log(`${INDENT}Run 'audit show <function>' for full history.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -10,11 +10,25 @@ export interface DetectedFunction {
   file: string;
 }
 
-const PATTERNS: Array<{ regex: RegExp; nameGroup: number }> = [
+const SUPPORTED_EXTENSIONS = [".ts", ".js", ".tsx", ".jsx", ".py"];
+
+function isSupportedFile(filePath: string): boolean {
+  return SUPPORTED_EXTENSIONS.some((ext) => filePath.endsWith(ext));
+}
+
+type Pattern = { regex: RegExp; nameGroup: number };
+
+const JS_PATTERNS: Pattern[] = [
   { regex: /^(export\s+)?(async\s+)?function\s+(\w+)\s*\(/, nameGroup: 3 },
   { regex: /^(export\s+)?(const|let|var)\s+(\w+)\s*=\s*(async\s+)?\(/, nameGroup: 3 },
   { regex: /^\s{2,}(async\s+)?(\w+)\s*\([^)]*\)\s*\{/, nameGroup: 2 },
   { regex: /^\s+(async\s+)?(\w+)\s*\([^)]*\)\s*\{/, nameGroup: 2 },
+];
+
+const PYTHON_PATTERNS: Pattern[] = [
+  { regex: /^async\s+def\s+(\w+)\s*\(/, nameGroup: 1 },
+  { regex: /^def\s+(\w+)\s*\(/, nameGroup: 1 },
+  { regex: /^\s{4}(async\s+)?def\s+(\w+)\s*\(/, nameGroup: 2 },
 ];
 
 const RESERVED_KEYWORDS = new Set([
@@ -38,17 +52,35 @@ function findFunctionEndLine(lines: string[], startIdx: number): number {
   return lines.length;
 }
 
+// Python end-of-function is the last line before a dedent to def's level (or shallower).
+function findPythonFunctionEnd(lines: string[], startIdx: number): number {
+  const startLine = lines[startIdx];
+  const defIndent = startLine.length - startLine.trimStart().length;
+  let lastNonBlank = startIdx;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= defIndent) return lastNonBlank + 1;
+    lastNonBlank = i;
+  }
+  return lastNonBlank + 1;
+}
+
 export async function detectFunctionsInFile(filePath: string): Promise<DetectedFunction[]> {
   const content = await fs.readFile(filePath, "utf-8");
   const lines = content.split("\n");
+  const isPython = filePath.endsWith(".py");
+  const patterns = isPython ? PYTHON_PATTERNS : JS_PATTERNS;
+  const findEnd = isPython ? findPythonFunctionEnd : findFunctionEndLine;
   const starts: Array<{ name: string; startLine: number }> = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+    if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("#")) continue;
 
-    for (const { regex, nameGroup } of PATTERNS) {
+    for (const { regex, nameGroup } of patterns) {
       const match = line.match(regex);
       if (match) {
         const name = match[nameGroup];
@@ -63,7 +95,7 @@ export async function detectFunctionsInFile(filePath: string): Promise<DetectedF
   return starts.map((fn) => ({
     name: fn.name,
     startLine: fn.startLine,
-    endLine: findFunctionEndLine(lines, fn.startLine - 1),
+    endLine: findEnd(lines, fn.startLine - 1),
     file: filePath,
   }));
 }
@@ -98,8 +130,6 @@ export async function mapHunksToFunctions(
   return result;
 }
 
-const SUPPORTED_EXTENSIONS = new Set([".ts", ".js", ".tsx", ".jsx", ".py"]);
-
 export async function getFunctionsChangedInCommit(
   changedFiles: string[],
   hunks: DiffHunk[],
@@ -109,7 +139,7 @@ export async function getFunctionsChangedInCommit(
   const entries: Entry[] = [];
 
   for (const file of changedFiles) {
-    if (!SUPPORTED_EXTENSIONS.has(path.extname(file))) continue;
+    if (!isSupportedFile(file)) continue;
 
     const absolutePath = path.join(repoRoot, file);
     const fileHunks = hunks.filter((h) => h.file === file);
@@ -233,6 +263,42 @@ export function gamma(a: number, b: number): number {
       console.log("  PASS: all three functions detected from one spanning hunk");
     } else {
       console.error("  FAIL: expected alpha, beta, gamma — got:", keys);
+      allPassed = false;
+    }
+  }
+
+  // Test 3: Python function detection
+  {
+    const tmpFile = path.join(os.tmpdir(), "test_math.py");
+    const pythonTest = `
+def add(a, b):
+    return a + b
+
+def subtract(a, b):
+    return a - b
+
+async def fetch_data(url):
+    pass
+
+class Calculator:
+    def multiply(self, a, b):
+        return a * b
+`;
+    await fs.writeFile(tmpFile, pythonTest);
+    const detected = await detectFunctionsInFile(tmpFile);
+    await fs.unlink(tmpFile);
+
+    console.log("\nTest 3 — Python detection:");
+    for (const fn of detected) {
+      console.log(`  ${fn.name}: lines ${fn.startLine}–${fn.endLine}`);
+    }
+    const names = detected.map((f) => f.name);
+    const expected = ["add", "subtract", "fetch_data", "multiply"];
+    const missing = expected.filter((n) => !names.includes(n));
+    if (missing.length === 0) {
+      console.log("  PASS: all Python functions detected (add, subtract, fetch_data, multiply)");
+    } else {
+      console.error("  FAIL: missing", missing, "— got:", names);
       allPassed = false;
     }
   }

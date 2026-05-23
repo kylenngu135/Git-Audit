@@ -104,6 +104,9 @@ export async function promptForResolution(
       aiTool: "human",
       status: "audited",
       linkedCommit: undefined,
+      intention: undefined,
+      responseSummary: undefined,
+      filesChanged: undefined,
     };
     await savePromptEvent(event);
     updatedConflict.resolvedBy = event.id;

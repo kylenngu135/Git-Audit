@@ -1,3 +1,9 @@
+// NOTE: This module is no longer used in the automatic
+// audit pipeline. Cards are now generated directly from
+// the developer's intention and Claude's captured
+// response in the post-commit hook.
+// Kept as a manual fallback for deep analysis.
+
 import path from "path";
 import fs from "fs/promises";
 import type { PromptEvent, AuditCard, FunctionRecord } from "../shared/types.js";
@@ -137,7 +143,7 @@ function matchesAny(text: string, needles: string[]): boolean {
 function countCardsWithMatch(cards: AuditCard[], needles: string[]): number {
   let count = 0;
   for (const card of cards) {
-    const joined = card.decisions.join(" ");
+    const joined = `${card.intention ?? ""} ${card.responseSummary ?? ""}`;
     if (matchesAny(joined, needles)) count += 1;
   }
   return count;
@@ -207,9 +213,7 @@ export async function extractConventions(
     const card = await readCard(latest.cardRef);
     if (card) cards.push(card);
 
-    for (const risk of record.openRisks ?? []) {
-      if (risk.severity === "high") highRiskMessages.push(risk.message);
-    }
+    // openRisks removed in simplified audit system
   }
 
   const conventions: string[] = [];
@@ -298,13 +302,11 @@ export async function getCodebaseSummary(repoRoot: string): Promise<CodebaseSumm
     const record = await readRecord(full);
     if (!record) continue;
     totalFunctions += 1;
-    if ((record.openRisks ?? []).some((r) => r.severity === "high")) {
-      functionsWithHighRisks += 1;
-    }
+    // openRisks removed in simplified audit system
     if (recentFunctions.length < 5 && record.auditHistory.length > 0) {
       const latest = record.auditHistory[record.auditHistory.length - 1];
       const card = await readCard(latest.cardRef);
-      const decision = card && card.decisions.length > 0 ? card.decisions[0] : "";
+      const decision = card?.intention ?? card?.responseSummary ?? "";
       if (decision) {
         recentFunctions.push({
           functionName: record.functionName,

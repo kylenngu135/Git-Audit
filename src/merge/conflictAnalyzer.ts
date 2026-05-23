@@ -127,7 +127,6 @@ export async function analyzeForConflict(
   const lastEntryA = recordA.auditHistory[recordA.auditHistory.length - 1];
   const lastEntryB = recordB.auditHistory[recordB.auditHistory.length - 1];
 
-  // cardRef is stored as an absolute path; convert to repo-relative for git show
   const relCardRefA = path.relative(repoRoot, lastEntryA.cardRef);
   const relCardRefB = path.relative(repoRoot, lastEntryB.cardRef);
 
@@ -151,7 +150,11 @@ export async function analyzeForConflict(
   const file = recordA.file;
   const candidates: AuditConflict[] = [];
 
-  // ── Direct opposition ────────────────────────────────────────────────────
+  // Use intention + responseSummary as the signal text for each card
+  const aText = `${cardA.intention ?? ""} ${cardA.responseSummary ?? ""}`.toLowerCase();
+  const bText = `${cardB.intention ?? ""} ${cardB.responseSummary ?? ""}`.toLowerCase();
+
+  // ── Direct opposition ─────────────────────────────────────────────────────
   const opposingPairs: [string, string][] = [
     ["cache", "no-cache"],
     ["always", "never"],
@@ -164,27 +167,24 @@ export async function analyzeForConflict(
   ];
 
   for (const [kwX, kwY] of opposingPairs) {
-    const aHasX = cardA.decisions.some((d) => d.toLowerCase().includes(kwX));
-    const aHasY = cardA.decisions.some((d) => d.toLowerCase().includes(kwY));
-    const bHasX = cardB.decisions.some((d) => d.toLowerCase().includes(kwX));
-    const bHasY = cardB.decisions.some((d) => d.toLowerCase().includes(kwY));
+    const aHasX = aText.includes(kwX);
+    const aHasY = aText.includes(kwY);
+    const bHasX = bText.includes(kwX);
+    const bHasY = bText.includes(kwY);
 
     const forwardConflict = aHasX && bHasY;
     const reverseConflict = aHasY && bHasX;
 
     if (forwardConflict || reverseConflict) {
       const [aKw, bKw] = forwardConflict ? [kwX, kwY] : [kwY, kwX];
-      const aIntent = cardA.decisions.find((d) => d.toLowerCase().includes(aKw)) ?? "";
-      const bIntent = cardB.decisions.find((d) => d.toLowerCase().includes(bKw)) ?? "";
-
       candidates.push({
         functionName,
         file,
         conflictType: "direct-opposition",
         branchA,
         branchB,
-        branchAIntent: aIntent,
-        branchBIntent: bIntent,
+        branchAIntent: cardA.intention ?? "",
+        branchBIntent: cardB.intention ?? "",
         explanation:
           `Branch ${branchA} uses "${aKw}" while branch ${branchB} uses "${bKw}" ` +
           `for the same function — these are direct design opposites.`,
@@ -195,44 +195,7 @@ export async function analyzeForConflict(
     }
   }
 
-  // ── Risk collision ───────────────────────────────────────────────────────
-  const dependencyKeywords = ["assumes", "depends on", "requires", "expects", "relies on"];
-
-  for (const risk of recordA.openRisks) {
-    if (risk.severity !== "high" && risk.severity !== "medium") continue;
-
-    const riskWords = risk.message
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((w) => w.length > 3);
-
-    const matchingDecision = cardB.decisions.find((decision) => {
-      const dLower = decision.toLowerCase();
-      const hasDepKeyword = dependencyKeywords.some((kw) => dLower.includes(kw));
-      if (!hasDepKeyword) return false;
-      return riskWords.some((word) => dLower.includes(word));
-    });
-
-    if (matchingDecision) {
-      candidates.push({
-        functionName,
-        file,
-        conflictType: "risk-collision",
-        branchA,
-        branchB,
-        branchAIntent: risk.message,
-        branchBIntent: matchingDecision,
-        explanation:
-          `Branch ${branchB} assumes "${matchingDecision}" but branch ${branchA} ` +
-          `has an unresolved ${risk.severity} risk: "${risk.message}".`,
-        severity: "high",
-        resolvedBy: undefined,
-      });
-      break;
-    }
-  }
-
-  // ── Philosophical tension ────────────────────────────────────────────────
+  // ── Philosophical tension ─────────────────────────────────────────────────
   const performanceKeywords = ["cache", "fast", "optimize", "lazy", "batch", "parallel"];
   const correctnessKeywords = ["validate", "verify", "strict", "always", "every", "safe"];
   const criticalPathPatterns = ["payment", "auth", "security", "core", "api"];
@@ -240,9 +203,6 @@ export async function analyzeForConflict(
   const isCriticalPath = criticalPathPatterns.some((p) => file.toLowerCase().includes(p));
 
   if (isCriticalPath) {
-    const aText = cardA.decisions.join(" ").toLowerCase();
-    const bText = cardB.decisions.join(" ").toLowerCase();
-
     const aIsPerf = performanceKeywords.some((kw) => aText.includes(kw));
     const aIsCorrect = correctnessKeywords.some((kw) => aText.includes(kw));
     const bIsPerf = performanceKeywords.some((kw) => bText.includes(kw));
@@ -260,8 +220,8 @@ export async function analyzeForConflict(
         conflictType: "philosophical-tension",
         branchA,
         branchB,
-        branchAIntent: `${aOrientation}-oriented: ${cardA.decisions.slice(0, 2).join("; ")}`,
-        branchBIntent: `${bOrientation}-oriented: ${cardB.decisions.slice(0, 2).join("; ")}`,
+        branchAIntent: cardA.intention ?? "",
+        branchBIntent: cardB.intention ?? "",
         explanation:
           `Branch ${branchA} takes a ${aOrientation} approach while branch ${branchB} ` +
           `takes a ${bOrientation} approach to this critical path function in ${file}.`,
@@ -271,18 +231,11 @@ export async function analyzeForConflict(
     }
   }
 
-  // ── Convention drift ─────────────────────────────────────────────────────
-  const aText = cardA.decisions.join(" ").toLowerCase();
-  const bText = cardB.decisions.join(" ").toLowerCase();
-
-  const aUsesTryCatch =
-    aText.includes("try/catch") || aText.includes("catch") || aText.includes("exception");
-  const aUsesReturnNull =
-    aText.includes("return null") || aText.includes("undefined") || aText.includes("falsy");
-  const bUsesTryCatch =
-    bText.includes("try/catch") || bText.includes("catch") || bText.includes("exception");
-  const bUsesReturnNull =
-    bText.includes("return null") || bText.includes("undefined") || bText.includes("falsy");
+  // ── Convention drift ──────────────────────────────────────────────────────
+  const aUsesTryCatch = aText.includes("try/catch") || aText.includes("catch") || aText.includes("exception");
+  const aUsesReturnNull = aText.includes("return null") || aText.includes("undefined") || aText.includes("falsy");
+  const bUsesTryCatch = bText.includes("try/catch") || bText.includes("catch") || bText.includes("exception");
+  const bUsesReturnNull = bText.includes("return null") || bText.includes("undefined") || bText.includes("falsy");
 
   const aDominant =
     aUsesTryCatch && !aUsesReturnNull
@@ -304,8 +257,8 @@ export async function analyzeForConflict(
       conflictType: "convention-drift",
       branchA,
       branchB,
-      branchAIntent: `Uses ${aDominant} for error handling`,
-      branchBIntent: `Uses ${bDominant} for error handling`,
+      branchAIntent: cardA.intention ?? "",
+      branchBIntent: cardB.intention ?? "",
       explanation:
         `Branch ${branchA} uses ${aDominant} while branch ${branchB} uses ${bDominant} ` +
         `for error handling in the same function — merging will produce inconsistent error handling conventions.`,

@@ -1,3 +1,9 @@
+// NOTE: This module is no longer used in the automatic
+// audit pipeline. Cards are now generated directly from
+// the developer's intention and Claude's captured
+// response in the post-commit hook.
+// Kept as a manual fallback for deep analysis.
+
 import path from "path";
 import fs from "fs/promises";
 import { fileURLToPath } from "node:url";
@@ -171,7 +177,7 @@ export async function runAuditOrchestrator(
     await saveOrUpdateFunctionRecord(card, root);
 
     process.stderr.write(
-      `git-audit: ✓ ${fn.functionName} — ${card.risks.length} risk(s) found, trust score saved\n`
+      `git-audit: ✓ ${fn.functionName} — card saved\n`
     );
 
     return fn.functionName;

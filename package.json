@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "tsc --outDir dist",
+    "postbuild": "chmod +x dist/cli/index.js",
     "dev": "tsx watch src/mcp/server.ts",
     "start:mcp": "tsx src/mcp/server.ts",
     "link": "npm run build && npm link",

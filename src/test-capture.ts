@@ -11,6 +11,9 @@ const event: PromptEvent = {
   status: "pending",
   linkedCommit: undefined,
   aiTool: "claude-code",
+  intention: undefined,
+  responseSummary: undefined,
+  filesChanged: undefined,
 };
 
 const filePath = await savePromptEvent(event);

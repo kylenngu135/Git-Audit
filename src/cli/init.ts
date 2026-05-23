@@ -28,6 +28,8 @@ async function createIfAbsent(filePath: string, content = ""): Promise<void> {
   }
 }
 
+const TSX_FALLBACK_PATH = "/home/kylenngu/.npm-global/bin/tsx";
+
 async function detectTsxPath(): Promise<string> {
   for (const probe of ["command -v tsx", "which tsx"]) {
     try {
@@ -41,11 +43,16 @@ async function detectTsxPath(): Promise<string> {
       // try next probe
     }
   }
-  throw new Error(
-    "could not find 'tsx' on PATH. Install it globally with:\n" +
-      "  npm install -g tsx\n" +
-      "Then re-run: audit init"
-  );
+  try {
+    await fs.access(TSX_FALLBACK_PATH);
+    return TSX_FALLBACK_PATH;
+  } catch {
+    throw new Error(
+      "could not find 'tsx' on PATH or at fallback location. Install it globally with:\n" +
+        "  npm install -g tsx\n" +
+        "Then re-run: audit init"
+    );
+  }
 }
 
 export async function runInit(): Promise<void> {
@@ -89,20 +96,21 @@ export async function runInit(): Promise<void> {
   // Step 3 — Install the post-commit git hook
   const hooksDir = path.join(repoRoot, ".git", "hooks");
   const hookPath = path.join(hooksDir, "post-commit");
-  const hookScriptPath = path.join(installRoot, "dist", "hooks", "post-commit.js");
-  const nodeCommand = `node ${hookScriptPath}`;
-  const hookContent = `#!/bin/sh\n${nodeCommand}\n`;
+  const hookScriptPath = path.join(installRoot, "src", "hooks", "post-commit.ts");
+  const hookCommand = `${tsxPath} ${hookScriptPath}`;
+  const hookContent = `#!/bin/sh\n${hookCommand}\n`;
 
   if (await existsAt(hookPath)) {
     const existing = await fs.readFile(hookPath, "utf-8");
-    if (existing.includes("git-audit")) {
-      console.log("[git-audit] post-commit hook already installed, skipping");
+    if (existing.toLowerCase().includes("git-audit")) {
+      await fs.writeFile(hookPath, hookContent);
+      await fs.chmod(hookPath, 0o755);
+      console.log("[git-audit] post-commit hook updated");
     } else {
       console.warn(
-        "[git-audit] WARNING: a post-commit hook already exists. " +
-          "Please manually add the following line to your existing hook:"
+        "[git-audit] WARNING: existing hook found that is not from git-audit. Add manually:"
       );
-      console.warn(`  ${nodeCommand}`);
+      console.warn(hookContent);
     }
   } else {
     await fs.writeFile(hookPath, hookContent);
@@ -118,14 +126,15 @@ export async function runInit(): Promise<void> {
 
   if (await existsAt(prePushPath)) {
     const existing = await fs.readFile(prePushPath, "utf-8");
-    if (existing.includes("git-audit") || existing.includes("pre-push.ts")) {
-      console.log("[git-audit] pre-push hook already installed, skipping");
+    if (existing.toLowerCase().includes("git-audit")) {
+      await fs.writeFile(prePushPath, prePushContent);
+      await fs.chmod(prePushPath, 0o755);
+      console.log("[git-audit] pre-push hook updated");
     } else {
       console.warn(
-        "[git-audit] WARNING: a pre-push hook already exists. " +
-          "Please manually add the following line to your existing hook:"
+        "[git-audit] WARNING: existing hook found that is not from git-audit. Add manually:"
       );
-      console.warn(`  ${prePushCommand}`);
+      console.warn(prePushContent);
     }
   } else {
     await fs.writeFile(prePushPath, prePushContent);
@@ -189,35 +198,33 @@ export async function runInit(): Promise<void> {
 
 ## git-audit Integration
 
-Before making ANY code changes, you MUST always call the
-capture_prompt MCP tool first with the exact prompt I gave you.
+For every coding task follow these two steps:
 
-Rules:
-1. When I give you a coding task, call capture_prompt FIRST
-   before touching any files
-2. Only start making changes AFTER capture_prompt returns
-   a successful event ID
-3. If capture_prompt is not available, tell me before proceeding
-4. This applies to every coding task in every project
+STEP 1 — Before making any changes:
+Call capture_prompt with:
+- prompt: the exact instruction I gave you
+- intention: why I am making this change — the goal
+  or problem being solved, in one sentence
+- aiTool: "claude-code"
+Save the returned event ID for step 2.
+
+STEP 2 — After finishing all changes:
+Call capture_response with:
+- eventId: the ID returned from capture_prompt
+- responseSummary: 2-3 sentences describing what you
+  changed and any important implementation notes or
+  caveats. Be concise and specific.
+- filesChanged: array of every file path you modified
+
+Always complete BOTH steps for every coding task.
+Never skip capture_response after making changes.
 `;
 
-  if (await existsAt(claudeMdPath)) {
-    const existing = await fs.readFile(claudeMdPath, "utf-8");
-    if (existing.includes("capture_prompt")) {
-      console.log("[git-audit] ~/.claude/CLAUDE.md already configured");
-    } else {
-      const separator = existing.endsWith("\n") ? "\n" : "\n\n";
-      await fs.appendFile(claudeMdPath, separator + claudeMdSection);
-      console.log(
-        "[git-audit] ~/.claude/CLAUDE.md configured — Claude Code will now call capture_prompt automatically"
-      );
-    }
-  } else {
-    await fs.writeFile(claudeMdPath, claudeMdSection);
-    console.log(
-      "[git-audit] ~/.claude/CLAUDE.md configured — Claude Code will now call capture_prompt automatically"
-    );
-  }
+  // Always overwrite — upgrade old single-step config to two-step
+  await fs.writeFile(claudeMdPath, claudeMdSection);
+  console.log(
+    "[git-audit] ~/.claude/CLAUDE.md configured — Claude Code will now call capture_prompt and capture_response automatically"
+  );
 
   // Step 7 — Register MCP server with Claude Code CLI
   try {
@@ -256,12 +263,10 @@ Rules:
   // Final instructions
   console.log(`
 [git-audit] Setup complete. Next steps:
-  1. Use Claude Code normally — prompts will be captured automatically
-  2. After each git commit, the post-commit hook will link your prompt to the commit and detect changed functions
-  3. Run: audit status  to see audit results
-
-[git-audit] Audit cards are generated via Claude Code CLI (uses your Claude Pro/Max subscription).
-No API key required. If Claude Code is unavailable, set ANTHROPIC_API_KEY as a fallback.`);
+  1. Use Claude Code normally — call capture_prompt before changes, capture_response after
+  2. After each git commit, the post-commit hook will create audit cards instantly
+  3. Run: audit status  to see results
+  4. Run: audit show <function>  to inspect any function's audit history`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
