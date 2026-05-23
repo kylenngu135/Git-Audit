@@ -25,14 +25,14 @@ export async function getDiffHunks(repoRoot: string): Promise<string> {
   try {
     return await runGitCommand("git diff HEAD~1 HEAD", repoRoot);
   } catch {
+    // HEAD~1 doesn't exist (first commit) — try staged, then full show
+    let cached = "";
+    try { cached = await runGitCommand("git diff --cached HEAD", repoRoot); } catch { /* fall through */ }
+    if (cached) return cached;
     try {
-      return await runGitCommand("git diff --cached HEAD", repoRoot);
+      return await runGitCommand("git show HEAD", repoRoot);
     } catch {
-      try {
-        return await runGitCommand("git show HEAD", repoRoot);
-      } catch {
-        return "";
-      }
+      return "";
     }
   }
 }
@@ -42,9 +42,12 @@ export async function getChangedFiles(repoRoot: string): Promise<string[]> {
   try {
     output = await runGitCommand("git diff --name-only HEAD~1 HEAD", repoRoot);
   } catch {
-    try {
-      output = await runGitCommand("git diff --cached --name-only HEAD", repoRoot);
-    } catch {
+    // HEAD~1 doesn't exist (first commit) — try staged, then full show
+    let cached = "";
+    try { cached = await runGitCommand("git diff --cached --name-only HEAD", repoRoot); } catch { /* fall through */ }
+    if (cached) {
+      output = cached;
+    } else {
       try {
         output = await runGitCommand("git show --name-only --format= HEAD", repoRoot);
       } catch {

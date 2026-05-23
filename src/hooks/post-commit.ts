@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { findRepoRoot, listPendingEvents, updatePromptEvent } from "../shared/eventStore.js";
 import { getCurrentCommitHash, getDiffHunks, getChangedFiles } from "../shared/gitUtils.js";
 import { parseDiff, filterSignificantHunks, groupHunksByFile } from "../shared/diffParser.js";
@@ -79,8 +80,10 @@ export async function runPostCommitHook(): Promise<void> {
   );
 }
 
-runPostCommitHook().catch((err: unknown) => {
-  process.stderr.write(
-    `prompt-audit error: ${err instanceof Error ? err.message : String(err)}\n`
-  );
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runPostCommitHook().catch((err: unknown) => {
+    process.stderr.write(
+      `prompt-audit error: ${err instanceof Error ? err.message : String(err)}\n`
+    );
+  });
+}

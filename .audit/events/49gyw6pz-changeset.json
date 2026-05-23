@@ -1,0 +1,77 @@
+{
+  "promptEventId": "49gyw6pz",
+  "commitHash": "b63f55c77536199909ede5b97e31549b377a8f70",
+  "timestamp": "2026-05-23T04:08:06.675Z",
+  "functionsChanged": [
+    {
+      "functionName": "init.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/cli/init.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "post-commit.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/hooks/post-commit.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "server.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/mcp/server.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "diffParser.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/diffParser.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "eventStore.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/eventStore.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "functionDetector.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/functionDetector.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "gitUtils.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/gitUtils.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "types.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/types.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "utils.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/shared/utils.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    },
+    {
+      "functionName": "test-capture.ts:module-level",
+      "file": "/home/kylenngu/programming/projects/Git-Audit/src/test-capture.ts",
+      "startLine": 0,
+      "endLine": 0,
+      "hunkCount": 1
+    }
+  ]
+}

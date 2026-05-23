@@ -1,0 +1,8 @@
+{
+  "id": "49gyw6pz",
+  "timestamp": "2026-05-23T04:08:06.648Z",
+  "rawPrompt": "test: simulate post-commit hook run",
+  "status": "linked",
+  "aiTool": "claude-code",
+  "linkedCommit": "b63f55c77536199909ede5b97e31549b377a8f70"
+}
